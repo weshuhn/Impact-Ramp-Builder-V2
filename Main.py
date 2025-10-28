@@ -6,6 +6,8 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 
+#py -m pip install PySide6
+
 class MainForm(QMainWindow):
     def __init__(self):
         super().__init__()

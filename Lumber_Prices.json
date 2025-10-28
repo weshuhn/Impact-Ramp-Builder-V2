@@ -1,0 +1,14 @@
+{"lumber_prices": 
+    [{"item": "2x4x8", "price_usd": 3.48},
+    {"item": "2x4x10", "price_usd": 5.98},
+    {"item": "2x4x12", "price_usd": 7.28},
+    {"item": "2x4x16", "price_usd": 11.28},
+    {"item": "2x6x8", "price_usd": 7.08},
+    {"item": "2x6x12", "price_usd": 10.98},
+    {"item": "2x6x16", "price_usd": 14.58},
+    {"item": "4x4x8", "price_usd": 8.98},
+    {"item": "4x4x10", "price_usd": 12.88},
+    {"item": "4x4x12", "price_usd": 99.99},
+    {"item": "4x4x16", "price_usd": 21.78}
+]
+}

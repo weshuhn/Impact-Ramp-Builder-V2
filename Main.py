@@ -6,6 +6,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 
+
 class MainForm(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -379,23 +380,47 @@ class DeckDesignerWindow(QMainWindow):
         self.view.ensureVisible(label.boundingRect())
     def draw_deck(self):
         self.scene.clear()
-
+        
+        # --- Start of Scaling Logic (Unchanged) ---
         if self.inch_unit:
-            SCALE =  1
+            SCALE = 1
         else:
-
-            SCALE = 12 # Let's use 10 for better visibility and calculation
+            # Let's use 10 for better visibility and calculation
+            SCALE = 10 
         
         visual_length = self.deck_length * SCALE
         visual_width = self.deck_width * SCALE
+        # --- End of Scaling Logic ---
         
+        # --- Texture Map Modification ---
+        try:
+            # 1. Load the texture image
+            texture_pixmap = QPixmap("Decking.png") # <<<<<< MAKE SURE THIS FILE EXISTS
+            if texture_pixmap.isNull():
+                print("Warning: Texture image 'wood_texture.png' not found or failed to load. Falling back to solid color.")
+                deck_brush = QColor(190, 190, 250, 100) # Fallback light blue fill
+            else:
+                # 2. Create the repeating brush
+                deck_brush = QBrush(texture_pixmap)
+                # Ensure it tiles/repeats. QBrush initialized with QPixmap often defaults to TexturePattern,
+                # but setting explicitly is good practice.
+                deck_brush.setStyle(Qt.TexturePattern) 
+                
+        except Exception as e:
+            # Catch other potential errors
+            print(f"Error loading texture: {e}. Falling back to solid color.")
+            deck_brush = QColor(190, 190, 250, 100) # Fallback light blue fill
+
         # The deck rectangle (drawn from (0, 0))
         self.deck_rect = QGraphicsRectItem(0, 0, visual_length, visual_width) # Store as instance variable
         self.deck_rect.setPen(QPen(QColor(50, 50, 200), 2)) # Blue outline
-        self.deck_rect.setBrush(QColor(190, 190, 250, 100)) # Light blue fill
+        
+        # 3. Apply the texture brush
+        self.deck_rect.setBrush(deck_brush) 
+        
         self.scene.addItem(self.deck_rect)
         
-        # Label the deck
+        # Label the deck (Unchanged)
         label = QGraphicsTextItem(f"Deck Area\n{self.deck_length} x {self.deck_width}")
         label.setDefaultTextColor(QColor(0, 0, 100))
         # Center the text
@@ -403,11 +428,10 @@ class DeckDesignerWindow(QMainWindow):
                      visual_width / 2 - label.boundingRect().height() / 2)
         self.scene.addItem(label)
         
-        # Set the scene's bounding rect to encompass the deck
-        # FIX: Change 'deck_rect' to 'self.deck_rect'
+        # Set the scene's bounding rect (Unchanged)
         self.scene.setSceneRect(QRectF(self.deck_rect.rect()).normalized().adjusted(-10, -10, 10, 10)) 
         
-        # Fit the view to the new scene bounds
+        # Fit the view to the new scene bounds (Unchanged)
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
     def add_components(self):

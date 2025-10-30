@@ -274,13 +274,15 @@ class DeckDesignerWindow(QMainWindow):
     def __init__(self, deck_length, deck_width, stair_count, inch, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Deck Designer - {deck_length} x {deck_width}")
-        self.setGeometry(200, 200, 800, 600)
+        self.setGeometry(200, 200, 1000, 800)
 
         self.inch_unit=inch
         self.deck_length = deck_length
         self.deck_width = deck_width
         self.stair_count = stair_count # Storing this new value
         
+        self.stair_items = []
+
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.master_layout = QVBoxLayout(self.central_widget)
@@ -397,23 +399,34 @@ class DeckDesignerWindow(QMainWindow):
             # 1. Load the texture image
             texture_pixmap = QPixmap("Decking.png") # <<<<<< MAKE SURE THIS FILE EXISTS
             if texture_pixmap.isNull():
-                print("Warning: Texture image 'wood_texture.png' not found or failed to load. Falling back to solid color.")
-                deck_brush = QColor(190, 190, 250, 100) # Fallback light blue fill
+                print("Warning: Texture image 'Decking.png' not found or failed to load. Falling back to solid color.")
+                deck_brush = QBrush(QColor(190, 190, 250, 100)) # Fallback light blue fill
             else:
-                # 2. Create the repeating brush
-                deck_brush = QBrush(texture_pixmap)
-                # Ensure it tiles/repeats. QBrush initialized with QPixmap often defaults to TexturePattern,
-                # but setting explicitly is good practice.
-                deck_brush.setStyle(Qt.TexturePattern) 
+                # **Crucial Step: Scale the QPixmap to the exact visual size**
+                # Use SmoothTransformation for better quality scaling
+                scaled_pixmap = texture_pixmap.scaled(
+                    visual_length, 
+                    visual_width, 
+                    Qt.IgnoreAspectRatio, 
+                    Qt.SmoothTransformation
+                )
+                
+                # 2. Create the non-repeating brush from the scaled image
+                deck_brush = QBrush(scaled_pixmap)
+                
+                # NOTE: For an image scaled to the exact size, using Qt.NoBrush
+                # or similar might be more explicit, but QBrush(pixmap) is sufficient.
+                # However, for an exact, non-repeating fit, you may not need the rect item's brush
+                # if you switch to a QGraphicsPixmapItem as noted below.
                 
         except Exception as e:
             # Catch other potential errors
             print(f"Error loading texture: {e}. Falling back to solid color.")
-            deck_brush = QColor(190, 190, 250, 100) # Fallback light blue fill
+            deck_brush = QBrush(QColor(190, 190, 250, 100)) # Fallback light blue fill
 
-        # The deck rectangle (drawn from (0, 0))
+        # deck outline
         self.deck_rect = QGraphicsRectItem(0, 0, visual_length, visual_width) # Store as instance variable
-        self.deck_rect.setPen(QPen(QColor(50, 50, 200), 2)) # Blue outline
+        #self.deck_rect.setPen(QPen(QColor(50, 50, 200), 2)) # Blue outline
         
         # 3. Apply the texture brush
         self.deck_rect.setBrush(deck_brush) 
@@ -440,36 +453,87 @@ class DeckDesignerWindow(QMainWindow):
         
         # Add stairs if count > 0
         if self.stair_count > 0:
-            # Pass the deck_item reference
-            stairs = StairsItem(self.inch_unit,deck_item=deck_item) 
-            # Place it near a corner (e.g., top-left)
-            stairs.setPos(0, 0) 
-            self.scene.addItem(stairs)
+            initial_x_offset = 0
+            # Loop to create multiple staircase objects
+            for i in range(self.stair_count):
+                # We also pass the index 'i' so the item can have a unique name
+                stairs = StairsItem(self.inch_unit, index=i + 1, deck_item=deck_item) 
+                
+                # Place the stairs item next to the previous one for a simple initial layout
+                stairs.setPos(initial_x_offset, 0)
+                
+                # Increment the offset for the next stair item
+                # The total visual width of a StairsItem is its boundingRect().width()
+                initial_x_offset += stairs.boundingRect().width()
+                
+                self.scene.addItem(stairs)
+                self.stair_items.append(stairs) # Store the reference
         
-        # Add ramp
-        # Pass the deck_item reference
-        ramp = RampItem(self.inch_unit,deck_item=deck_item) 
-        # Place it near a corner (e.g., top-right)
-        ramp.setPos(deck_item.rect().width() - ramp.boundingRect().width(), 0)
+        # Add ramp (Ramp Item logic remains the same)
+        ramp = RampItem(self.inch_unit, deck_item=deck_item) 
+        # Use the accumulated offset for the ramp's starting position
+        ramp_x_pos = deck_item.rect().width() - ramp.boundingRect().width()
+        ramp.setPos(ramp_x_pos, 0)
         self.scene.addItem(ramp)
+        self.ramp_item = ramp # Store the reference
          
 class DraggableItem(QGraphicsRectItem):
     """
     Base class for any item (Stairs, Ramp) that needs to be draggable 
     and snap to the 8 corner positions of the main deck item.
     """
-    def __init__(self, rect, color, name="Item", deck_item=None, parent=None):
+    def __init__(self, rect, color, name="Item", deck_item=None, texture_path=None, parent=None):
         super().__init__(rect, parent)
-        self.setBrush(QColor(color))
-        self.setPen(QPen(QColor(0, 0, 0), 1))
         self.name = name
-        self.deck_item = deck_item # Reference to the QGraphicsRectItem representing the deck
+        self.deck_item = deck_item
         
         # Enable dragging for this item
         self.setFlag(QGraphicsRectItem.ItemIsMovable) 
-        # ItemSendsGeometryChanges is not strictly needed since we handle snapping on release
         self.setCacheMode(QGraphicsRectItem.DeviceCoordinateCache)
 
+        # --- MODIFIED: Handle Texture or Fallback Color ---
+        brush = QBrush(QColor(color)) # Default brush
+        
+        if texture_path:
+            try:
+                texture_pixmap = QPixmap(texture_path)
+                if not texture_pixmap.isNull():
+                    # Scale the pixmap to the item's visual size
+                    scaled_pixmap = texture_pixmap.scaled(
+                        rect.width(), 
+                        rect.height(), 
+                        Qt.IgnoreAspectRatio, 
+                        Qt.SmoothTransformation
+                    )
+                    brush = QBrush(scaled_pixmap)
+                else:
+                    print(f"Warning: Texture image '{texture_path}' not found or failed to load for {self.name}. Using solid color.")
+            except Exception as e:
+                print(f"Error loading texture for {self.name}: {e}. Using solid color.")
+
+        self.setBrush(brush)
+        self.setPen(QPen(QColor(0, 0, 0), 1))
+
+        # Add the text label
+        self.add_label()
+        
+    def add_label(self):
+        """Creates and centers a text label on the item."""
+        label = QGraphicsTextItem(self.name, parent=self)
+        label.setDefaultTextColor(QColor(0, 0, 0)) # Black text
+
+        # Get the item's bounding rectangle (local coordinates)
+        item_rect = self.boundingRect()
+        
+        # Get the label's bounding rectangle
+        label_bounds = label.boundingRect()
+
+        # Calculate position to center the label within the item
+        x = item_rect.width() / 2 - label_bounds.width() / 2
+        y = item_rect.height() / 2 - label_bounds.height() / 2
+        
+        # Set the label position (relative to the DraggableItem)
+        label.setPos(x, y)
     def mousePressEvent(self, event):
         # We need to call the base implementation to start the drag operation
         super().mousePressEvent(event)
@@ -539,14 +603,32 @@ class DraggableItem(QGraphicsRectItem):
 
 class StairsItem(DraggableItem):
     # FIX: Add deck_item to the signature and pass it to super()
-    def __init__(self,scale, deck_item=None, parent=None):
-        super().__init__(QRectF(0, 0, 36, 36), QColor(255, 150, 50), "Stairs", deck_item, parent)
+    # Added 'index' to the signature
+    def __init__(self, scale, index=1, deck_item=None, parent=None):
+        super().__init__(
+                    QRectF(0, 0, 36, 36), # Positional 1: rect
+                    QColor(255, 150, 50, 200), # Positional 2: color
+                    f"STAIRS {index}", # Positional 3: name, now uses index
+                    
+                    # --- START OF KEYWORD ARGUMENTS ---
+                    deck_item=deck_item, # Keyword (Recommended)
+                    texture_path="Stair_T.png", # Keyword
+                    parent=parent# Keyword (Must be named because it follows texture_path)
+                )
         
 class RampItem(DraggableItem):
     # FIX: Add deck_item to the signature and pass it to super()
     def __init__(self,scale, deck_item=None, parent=None): 
         # Placeholder size: 10 units wide x 20 units long (100x200 pixels using SCALE=10)
-        super().__init__(QRectF(0, 0, 48, 48), QColor(50, 200, 50), "Ramp", deck_item, parent)
+            super().__init__(
+                QRectF(0, 0, 48, 48), 
+                QColor(50, 200, 50, 200),
+                "RAMP", 
+                # --- START OF KEYWORD ARGUMENTS ---
+                deck_item=deck_item,            # Keyword (Recommended)
+                texture_path="Ramp_T.png",        # Keyword
+                parent=parent                   # Keyword (Must be named because it follows texture_path)
+            )
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

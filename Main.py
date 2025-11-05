@@ -609,7 +609,6 @@ class StairsItem(DraggableItem):
                     QRectF(0, 0, 36, 36), # Positional 1: rect
                     QColor(255, 150, 50, 200), # Positional 2: color
                     f"STAIRS {index}", # Positional 3: name, now uses index
-                    
                     # --- START OF KEYWORD ARGUMENTS ---
                     deck_item=deck_item, # Keyword (Recommended)
                     texture_path="Stair_T.png", # Keyword
@@ -624,7 +623,7 @@ class RampItem(DraggableItem):
                 QRectF(0, 0, 48, 48), 
                 QColor(50, 200, 50, 200),
                 "RAMP", 
-                # --- START OF KEYWORD ARGUMENTS ---
+                # 
                 deck_item=deck_item,            # Keyword (Recommended)
                 texture_path="Ramp_T.png",        # Keyword
                 parent=parent                   # Keyword (Must be named because it follows texture_path)

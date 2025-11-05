@@ -1,0 +1,550 @@
+# FreeCAD and PySide Imports
+import FreeCAD
+import FreeCADGui
+import Part
+import json
+import sys
+import os # <-- FIX: Import 'os' to build file paths
+
+# MODIFICATION: Use FreeCAD's built-in PySide, NOT PySide6
+from PySide import QtCore, QtGui
+
+class MainForm(QtGui.QWidget):
+    def __init__(self):
+        super(MainForm, self).__init__()
+        
+        # --- PATH FIX: Find the macro's own directory ---
+        # __file__ is the path of the currently running script
+        self.macro_dir = os.path.dirname(__file__) 
+        json_path = os.path.join(self.macro_dir, 'Lumber_Prices.json')
+        # --- END FIX ---
+        
+        self.lumber_prices = self.load_lumber_prices(json_path) # Pass the full path
+        self.create_form_layout()
+
+    def load_lumber_prices(self, file_path): # Changed to accept the full file_path
+        """Reads the JSON file and returns the list of lumber prices."""
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+                return data.get('lumber_prices', [])
+        except FileNotFoundError:
+            # Now prints the full path in the error
+            print(f"Error: JSON file not found at {file_path}")
+            FreeCAD.Console.PrintWarning(f"Lumber_Prices.json not found at {file_path}\n")
+            return []
+        except json.JSONDecodeError:
+            print("Error: Could not parse JSON data. Check file formatting.")
+            FreeCAD.Console.PrintWarning("Error parsing Lumber_Prices.json\n")
+            return []
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            FreeCAD.Console.PrintError(f"Error loading lumber prices: {e}\n")
+            return []
+    
+    def create_form_layout(self):
+        # (This function is unchanged, it just builds the UI)
+        master_layout = QtGui.QHBoxLayout(self)
+        form_container_layout = QtGui.QVBoxLayout()
+        form_grid = QtGui.QGridLayout()
+        self.heading_label = QtGui.QLabel("<h1>Basic Info</h1>")
+        form_grid.addWidget(self.heading_label, 0, 0)
+        self.client_label = QtGui.QLabel("Client Name:")
+        self.client_input = QtGui.QLineEdit()
+        form_grid.addWidget(self.client_label, 1, 0)
+        form_grid.addWidget(self.client_input, 1, 1)
+        self.site_label = QtGui.QLabel("Site Number:")
+        self.site_input = QtGui.QLineEdit()
+        form_grid.addWidget(self.site_label, 2, 0)
+        form_grid.addWidget(self.site_input, 2, 1)
+        self.heading_label = QtGui.QLabel("<h1>Deck/Porch Info</h1>")
+        form_grid.addWidget(self.heading_label, 3, 0)
+        self.inch_label = QtGui.QLabel("Input unit inches? :")
+        self.inch_input = QtGui.QCheckBox()
+        form_grid.addWidget(self.inch_label, 4, 0)
+        form_grid.addWidget(self.inch_input, 4, 1)
+        self.length_label = QtGui.QLabel("Length (Foot):")
+        self.length_input = QtGui.QLineEdit()
+        self.length_input.setValidator(QtGui.QIntValidator(0, 99999, parent=self))
+        form_grid.addWidget(self.length_label, 5, 0)
+        form_grid.addWidget(self.length_input, 5, 1)
+        self.width_label = QtGui.QLabel("Width: (Foot)")
+        self.width_input = QtGui.QLineEdit()
+        self.width_input.setValidator(QtGui.QIntValidator(0, 99999, parent=self))
+        form_grid.addWidget(self.width_label, 6, 0)
+        form_grid.addWidget(self.width_input, 6, 1)
+        self.Stair_Label = QtGui.QLabel("Number of Stairs:")
+        self.Stair_input = QtGui.QLineEdit()
+        self.Stair_input.setValidator(QtGui.QIntValidator(0, 4, parent=self))
+        form_grid.addWidget(self.Stair_Label, 7, 0)
+        form_grid.addWidget(self.Stair_input, 7, 1)
+        self.heading_label = QtGui.QLabel("<h1>Ramp Info</h1>")
+        form_grid.addWidget(self.heading_label, 8, 0)
+        self.ramp_desc_label = QtGui.QLabel("Ramp :")
+        self.ramp_desc_input = QtGui.QLineEdit()
+        self.ramp_desc_input.setMinimumSize(250,40)
+        form_grid.addWidget(self.ramp_desc_label, 9, 0)
+        form_grid.addWidget(self.ramp_desc_input, 9, 1)
+        self.flat_label = QtGui.QLabel("Ending flat? :")
+        self.flat_input = QtGui.QCheckBox()
+        form_grid.addWidget(self.flat_label, 10, 0)
+        form_grid.addWidget(self.flat_input, 10, 1)
+        self.heading_label = QtGui.QLabel("<h3>Slope:</h3>")
+        form_grid.addWidget(self.heading_label, 11, 0)
+        self.drop_label = QtGui.QLabel("Drop (Inches) :")
+        self.drop_input = QtGui.QLineEdit()
+        self.drop_input.setValidator(QtGui.QIntValidator(0, 10, parent=self))
+        form_grid.addWidget(self.drop_label, 12, 0)
+        form_grid.addWidget(self.drop_input, 12, 1)
+        self.degree_label = QtGui.QLabel("Degree (Angle) :")
+        self.degree_input = QtGui.QLineEdit()
+        self.degree_input.setValidator(QtGui.QIntValidator(0, 10, parent=self))
+        form_grid.addWidget(self.degree_label, 13, 0)
+        form_grid.addWidget(self.degree_input, 13, 1)
+        self.heading_label = QtGui.QLabel("<h1>Gen Info</h1>")
+        form_grid.addWidget(self.heading_label, 14, 0)
+        self.point_label = QtGui.QLabel("Point Cloud Post Set (optional):")
+        self.point_display = QtGui.QLineEdit()
+        self.point_pick = QtGui.QPushButton("Browse...")
+        self.point_display.setReadOnly(True)
+        form_grid.addWidget(self.point_label, 15, 0)
+        form_grid.addWidget(self.point_display, 15, 1)
+        form_grid.addWidget(self.point_pick, 15, 2)
+        self.point_pick.clicked.connect(self.open_file_dialog)
+        self.post_label = QtGui.QLabel("Normal Post Set:")
+        self.post_input = QtGui.QCheckBox()
+        form_grid.addWidget(self.post_label, 16, 0)
+        form_grid.addWidget(self.post_input, 16, 1)
+        self.submit_button = QtGui.QPushButton("Submit Data")
+        self.submit_button.clicked.connect(self.submit_form)
+        form_container_layout.addLayout(form_grid)
+        form_container_layout.addWidget(self.submit_button)
+        form_container_layout.addStretch(1)
+        cost_group = QtGui.QGroupBox("Current Lumber Costs (USD)")
+        cost_layout = QtGui.QGridLayout(cost_group)
+        cost_row = 0
+        if not self.lumber_prices:
+            error_label = QtGui.QLabel("Error loading prices from file.")
+            error_label.setStyleSheet("color: red;")
+            cost_layout.addWidget(error_label, 0, 0, 1, 2)
+        else:
+            for item_data in self.lumber_prices:
+                item_name = item_data.get('item', 'Unknown Item')
+                item_price = item_data.get('price_usd', 0.0)
+                item_label = QtGui.QLabel(f"{item_name} Cost:")
+                price_input = QtGui.QLineEdit()
+                price_input.setReadOnly(True)
+                price_input.setText(f"${item_price:.2f}")
+                setattr(self, f"cost_{item_name.replace(' ', '_').lower()}_label", item_label)
+                setattr(self, f"cost_{item_name.replace(' ', '_').lower()}_input", price_input)
+                cost_layout.addWidget(item_label, cost_row, 0)
+                cost_layout.addWidget(price_input, cost_row, 1)
+                cost_row += 1
+            master_layout.addLayout(form_container_layout)
+            master_layout.addSpacing(100)
+            master_layout.addWidget(cost_group)
+
+    def open_file_dialog(self):
+        file_path, _ = QtGui.QFileDialog.getOpenFileName(
+            self, "Select a Point Cloud File", "",
+            "Point Cloud (*.E57);; Polygon File Format (*.ply);;All Files (*.*)"
+        )
+        if file_path:
+            self.point_display.setText(file_path)
+            print(f"File selected: {file_path}")
+        else:
+            print("File selection canceled.")
+
+    def submit_form(self):
+        # (This function is unchanged, it just validates data)
+        deck=False
+        ramp=False
+        Client_Name = self.client_input.text()
+        Site_Number = self.site_input.text()
+        Inches_Deck = self.inch_input.isChecked()
+        Deck_Length = self.length_input.text()
+        Deck_Width = self.width_input.text()
+        Stair_Number = self.Stair_input.text()
+        Ramp_Desc = self.ramp_desc_input.text()
+        Flat_Bool = self.flat_input.isChecked()
+        Drop_Slope = self.drop_input.text()
+        Drop_Angle = self.degree_input.text()
+        Point_Cloud = self.point_display.text()
+        No_Tech_Bool = self.post_input.isChecked()
+        errors = []
+        if not Client_Name: errors.append("Client Name cannot be empty.")
+        if not Site_Number: errors.append("Site Number cannot be empty.")
+        if Deck_Length != "" or Deck_Width != "" or Stair_Number != "":
+            deck=True
+            if not Deck_Length: errors.append("Deck Length is required.")
+            if not Deck_Width: errors.append("Deck Width is required.")
+            if not Stair_Number: errors.append("Number of Stairs is required.")
+        if Ramp_Desc != "" or Drop_Slope != "" or Drop_Angle != "":
+            ramp=True
+            if not Ramp_Desc: errors.append("Ramp Description cannot be empty.")
+            if not Drop_Slope and not Drop_Angle:
+                errors.append("Either 'Drop (Inches)' or 'Degree (Angle)' must be provided for the ramp slope.")
+            elif Drop_Slope and Drop_Angle:
+                    errors.append("Please provide only one value for the ramp slope: either 'Drop (Inches)' or 'Degree (Angle)'.")
+        if errors:
+            QtGui.QMessageBox.warning(
+                self, "Validation Error",
+                "Please correct the following errors before submitting:\n\n" + "\n".join(f"* {e}" for e in errors)
+            )
+            return
+        Deck_Length = int(Deck_Length)
+        Deck_Width = int(Deck_Width)
+        Stair_Number = int(Stair_Number)
+        Drop_Slope = int(Drop_Slope) if Drop_Slope else None
+        Drop_Angle = int(Drop_Angle) if Drop_Angle else None
+
+        if Deck_Length > 0 and Deck_Width > 0:
+            # --- PATH FIX: Pass the macro_dir to the new window ---
+            self.deck_designer_window = DeckDesignerWindow(
+                Deck_Length, Deck_Width, Stair_Number, Inches_Deck, 
+                self.macro_dir, # Pass the path
+                parent=self
+            )
+            # --- END FIX ---
+            self.deck_designer_window.show()
+            print("Launched Deck Designer Window.")
+            
+
+# deck break out
+class DeckDesignerWindow(QtGui.QMainWindow):
+    def __init__(self, deck_length, deck_width, stair_count, inch, macro_dir, parent=None): # <-- FIX: Added macro_dir
+        super(DeckDesignerWindow, self).__init__(parent)
+        self.setWindowTitle(f"Deck Designer - {deck_length} x {deck_width}")
+        self.setGeometry(200, 200, 1000, 800)
+
+        self.inch_unit=inch
+        self.deck_length = deck_length
+        self.deck_width = deck_width
+        self.stair_count = stair_count
+        self.macro_dir = macro_dir # <-- FIX: Save the path
+        
+        self.stair_items = []
+
+        self.central_widget = QtGui.QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.master_layout = QtGui.QVBoxLayout(self.central_widget)
+        
+        self.create_design_space()
+        
+    def create_design_space(self):
+        # (This function is unchanged, it just builds the UI)
+        title_label = QtGui.QLabel("<h2>Deck and Ramp Placement (Top View)</h2>")
+        self.master_layout.addWidget(title_label)
+        control_group = QtGui.QGroupBox("Design Controls")
+        control_layout = QtGui.QHBoxLayout(control_group)
+        house_label = QtGui.QLabel("House Facing Side:")
+        self.house_side_combo = QtGui.QComboBox()
+        self.house_side_combo.addItems(["Top", "Bottom", "Left", "Right"])
+        self.house_side_combo.currentTextChanged.connect(self.update_house_label)
+        control_layout.addWidget(house_label)
+        control_layout.addWidget(self.house_side_combo)
+        control_layout.addStretch(1)
+        self.build_button = QtGui.QPushButton("Build 3D Model in FreeCAD")
+        self.build_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 5px; font-weight: bold;")
+        self.build_button.clicked.connect(self.build_in_freecad)
+        control_layout.addWidget(self.build_button)
+        self.master_layout.addWidget(control_group)
+        self.scene = QtGui.QGraphicsScene()
+        self.view = QtGui.QGraphicsView(self.scene)
+        self.view.setRenderHint(QtGui.QPainter.Antialiasing)
+        self.master_layout.addWidget(self.view)
+        self.draw_deck()
+        self.add_components()
+        self.house_label_item = None
+        self.update_house_label(self.house_side_combo.currentText())
+
+    def build_in_freecad(self):
+        # (This function is unchanged, it just builds the 3D parts)
+        print("Building 3D model in FreeCAD...")
+        house_side = self.house_side_combo.currentText()
+        print(f"House on {house_side} side.")
+        if self.inch_unit:
+            deck_l_mm = self.deck_length * 25.4
+            deck_w_mm = self.deck_width * 25.4
+        else:
+            deck_l_mm = self.deck_length * 304.8
+            deck_w_mm = self.deck_width * 304.8
+        deck_h_mm = 152.4 
+        print(f"Deck (mm): L={deck_l_mm}, W={deck_w_mm}, H={deck_h_mm}")
+        try:
+            doc = FreeCAD.newDocument("Deck_Project")
+        except Exception:
+            doc = FreeCAD.ActiveDocument
+            if not doc:
+                QtGui.QMessageBox.critical(self, "FreeCAD Error", "Could not create or find a FreeCAD document.")
+                return
+        deck_shape = Part.makeBox(deck_l_mm, deck_w_mm, deck_h_mm)
+        deck_obj = doc.addObject("Part::Feature", "Deck")
+        deck_obj.Shape = deck_shape
+        for i, stair_item in enumerate(self.stair_items):
+            pos = stair_item.pos()
+            rect = stair_item.boundingRect()
+            print(f"Stair {i+1} at scene pos: ({pos.x()}, {pos.y()})")
+            stair_w_mm = rect.width() * 25.4 
+            stair_l_mm = rect.height() * 25.4
+            stair_h_mm = 152.4
+            stair_shape = Part.makeBox(stair_l_mm, stair_w_mm, stair_h_mm)
+            stair_obj = doc.addObject("Part::Feature", f"Stairs_{i+1}")
+            stair_obj.Shape = stair_shape
+            stair_obj.Placement = FreeCAD.Placement(
+                FreeCAD.Vector(deck_l_mm + 500, i * (stair_w_mm + 200), 0), 
+                FreeCAD.Rotation(0,0,0)
+            )
+        ramp_pos = self.ramp_item.pos()
+        ramp_rect = self.ramp_item.boundingRect()
+        print(f"Ramp at scene pos: ({ramp_pos.x()}, {ramp_pos.y()})")
+        ramp_w_mm = ramp_rect.width() * 25.4
+        ramp_l_mm = ramp_rect.height() * 25.4
+        ramp_h_mm = 152.4
+        ramp_shape = Part.makeBox(ramp_l_mm, ramp_w_mm, ramp_h_mm)
+        ramp_obj = doc.addObject("Part::Feature", "Ramp")
+        ramp_obj.Shape = ramp_shape
+        ramp_obj.Placement = FreeCAD.Placement(
+            FreeCAD.Vector(deck_l_mm + 500, -ramp_w_mm - 200, 0), 
+            FreeCAD.Rotation(0,0,0)
+        )
+        doc.recompute()
+        FreeCADGui.SendMsgToActiveView("ViewFit")
+        print("Build complete. Closing windows.")
+        self.close()
+        FreeCADGui.Control.closeDialog()
+
+    def update_house_label(self, side: str):
+        # (This function is unchanged, it just draws the "HOUSE" text)
+        if self.house_label_item:
+            self.scene.removeItem(self.house_label_item)
+            self.house_label_item = None
+        if not hasattr(self, 'deck_rect') or not self.deck_rect:
+            return
+        deck_rect = self.deck_rect.rect()
+        label_text = "HOUSE"
+        label = QtGui.QGraphicsTextItem(label_text)
+        label.setDefaultTextColor(QtGui.QColor(255, 0, 0))
+        font = label.font()
+        font.setPointSize(20)
+        font.setBold(True)
+        label.setFont(font)
+        label_bounds = label.boundingRect()
+        if side == "Top":
+            x = deck_rect.left() + (deck_rect.width() - label_bounds.width()) / 2
+            y = deck_rect.top() - label_bounds.height()
+        elif side == "Bottom":
+            x = deck_rect.left() + (deck_rect.width() - label_bounds.width()) / 2
+            y = deck_rect.bottom()
+        elif side == "Left":
+            x = deck_rect.left() - label_bounds.width()
+            y = deck_rect.top() + (deck_rect.height() - label_bounds.height()) / 2
+            label.setRotation(-90)
+            x += label_bounds.height()
+        elif side == "Right":
+            x = deck_rect.right()
+            y = deck_rect.top() + (deck_rect.height() - label_bounds.height()) / 2
+            label.setRotation(90)
+            y += label_bounds.width()
+        else:
+            return
+        label.setPos(x, y)
+        self.scene.addItem(label)
+        self.house_label_item = label
+        
+    def draw_deck(self):
+        self.scene.clear()
+        
+        if self.inch_unit:
+            SCALE = 1
+        else:
+            SCALE = 10 
+        
+        visual_length = self.deck_length * SCALE
+        visual_width = self.deck_width * SCALE
+        
+        try:
+            # --- PATH FIX: Use absolute path for texture ---
+            texture_path = os.path.join(self.macro_dir, "Decking.png")
+            texture_pixmap = QtGui.QPixmap(texture_path)
+            # --- END FIX ---
+            
+            if texture_pixmap.isNull():
+                print(f"Warning: Texture image 'Decking.png' not found at {texture_path}")
+                deck_brush = QtGui.QBrush(QtGui.QColor(190, 190, 250, 100))
+            else:
+                scaled_pixmap = texture_pixmap.scaled(
+                    visual_length, visual_width,
+                    QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.SmoothTransformation
+                )
+                deck_brush = QtGui.QBrush(scaled_pixmap)
+                
+        except Exception as e:
+            print(f"Error loading texture: {e}. Falling back to solid color.")
+            deck_brush = QtGui.QBrush(QtGui.QColor(190, 190, 250, 100))
+
+        self.deck_rect = QtGui.QGraphicsRectItem(0, 0, visual_length, visual_width)
+        self.deck_rect.setBrush(deck_brush)
+        self.scene.addItem(self.deck_rect)
+        
+        label = QtGui.QGraphicsTextItem(f"Deck Area\n{self.deck_length} x {self.deck_width}")
+        label.setDefaultTextColor(QtGui.QColor(0, 0, 100))
+        label.setPos(visual_length / 2 - label.boundingRect().width() / 2,
+                     visual_width / 2 - label.boundingRect().height() / 2)
+        self.scene.addItem(label)
+        
+        self.scene.setSceneRect(QtCore.QRectF(self.deck_rect.rect()).normalized().adjusted(-10, -10, 10, 10))
+        self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
+
+    def add_components(self):
+        deck_item = self.deck_rect
+        
+        if self.stair_count > 0:
+            initial_x_offset = 0
+            for i in range(self.stair_count):
+                # --- PATH FIX: Pass macro_dir to item ---
+                stairs = StairsItem(self.inch_unit, index=i + 1, deck_item=deck_item, macro_dir=self.macro_dir)
+                # --- END FIX ---
+                stairs.setPos(initial_x_offset, 0)
+                initial_x_offset += stairs.boundingRect().width()
+                self.scene.addItem(stairs)
+                self.stair_items.append(stairs)
+        
+        # --- PATH FIX: Pass macro_dir to item ---
+        ramp = RampItem(self.inch_unit, deck_item=deck_item, macro_dir=self.macro_dir)
+        # --- END FIX ---
+        ramp_x_pos = deck_item.rect().width() - ramp.boundingRect().width()
+        ramp.setPos(ramp_x_pos, 0)
+        self.scene.addItem(ramp)
+        self.ramp_item = ramp
+        
+class DraggableItem(QtGui.QGraphicsRectItem):
+    # --- PATH FIX: Accept macro_dir and use it to build texture_path ---
+    def __init__(self, rect, color, name="Item", deck_item=None, texture_path=None, parent=None):
+        # Note: texture_path here is now the *full, absolute path*
+        # It was constructed in StairsItem and RampItem
+        super(DraggableItem, self).__init__(rect, parent)
+        self.name = name
+        self.deck_item = deck_item
+        
+        self.setFlag(QtGui.QGraphicsRectItem.ItemIsMovable)
+        self.setCacheMode(QtGui.QGraphicsRectItem.DeviceCoordinateCache)
+
+        brush = QtGui.QBrush(QtGui.QColor(color))
+        
+        if texture_path: # texture_path is already the full path
+            try:
+                texture_pixmap = QtGui.QPixmap(texture_path) 
+                if not texture_pixmap.isNull():
+                    scaled_pixmap = texture_pixmap.scaled(
+                        rect.width(), rect.height,
+                        QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.SmoothTransformation
+                    )
+                    brush = QtGui.QBrush(scaled_pixmap)
+                else:
+                    print(f"Warning: Texture image not found at '{texture_path}'")
+            except Exception as e:
+                print(f"Error loading texture for {self.name}: {e}. Using solid color.")
+
+        self.setBrush(brush)
+        self.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0), 1))
+        self.add_label()
+        
+    def add_label(self):
+        # (This function is unchanged)
+        label = QtGui.QGraphicsTextItem(self.name, parent=self)
+        label.setDefaultTextColor(QtGui.QColor(0, 0, 0))
+        item_rect = self.boundingRect()
+        label_bounds = label.boundingRect()
+        x = item_rect.width() / 2 - label_bounds.width() / 2
+        y = item_rect.height() / 2 - label_bounds.height() / 2
+        label.setPos(x, y)
+        
+    def mousePressEvent(self, event):
+        # (This function is unchanged)
+        super(DraggableItem, self).mousePressEvent(event)
+        print(f"Clicked and dragging {self.name}")
+
+    def get_snap_positions(self):
+        # (This function is unchanged)
+        if not self.deck_item:
+            return []
+        deck_rect = self.deck_item.rect()
+        item_w = self.boundingRect().width()
+        item_h = self.boundingRect().height()
+        positions = []
+        positions.append(QtCore.QPointF(deck_rect.left(), deck_rect.top() - item_h))
+        positions.append(QtCore.QPointF(deck_rect.left() - item_w, deck_rect.top()))
+        positions.append(QtCore.QPointF(deck_rect.right() - item_w, deck_rect.top() - item_h))
+        positions.append(QtCore.QPointF(deck_rect.right(), deck_rect.top()))
+        positions.append(QtCore.QPointF(deck_rect.right() - item_w, deck_rect.bottom()))
+        positions.append(QtCore.QPointF(deck_rect.right(), deck_rect.bottom() - item_h))
+        positions.append(QtCore.QPointF(deck_rect.left(), deck_rect.bottom()))
+        positions.append(QtCore.QPointF(deck_rect.left() - item_w, deck_rect.bottom() - item_h))
+        return positions
+        
+    def mouseReleaseEvent(self, event):
+        # (This function is unchanged)
+        super(DraggableItem, self).mouseReleaseEvent(event)
+        current_pos = self.pos()
+        snap_positions = self.get_snap_positions()
+        if not snap_positions:
+            return
+        min_distance_sq = float('inf')
+        nearest_pos = current_pos
+        for snap_pos in snap_positions:
+            dx = snap_pos.x() - current_pos.x()
+            dy = snap_pos.y() - current_pos.y()
+            distance_sq = dx*dx + dy*dy
+            if distance_sq < min_distance_sq:
+                min_distance_sq = distance_sq
+                nearest_pos = snap_pos
+        self.setPos(nearest_pos)
+        print(f"{self.name} snapped to: ({nearest_pos.x():.2f}, {nearest_pos.y():.2f})")
+
+class StairsItem(DraggableItem):
+    # --- PATH FIX: Accept macro_dir and build full path ---
+    def __init__(self, scale, index=1, deck_item=None, macro_dir="", parent=None):
+        full_texture_path = os.path.join(macro_dir, "Stair_T.png")
+        super(StairsItem, self).__init__(
+            QtCore.QRectF(0, 0, 36, 36),
+            QtGui.QColor(255, 150, 50, 200),
+            f"STAIRS {index}",
+            deck_item=deck_item,
+            texture_path=full_texture_path, # Pass the full path
+            parent=parent
+        )
+        
+class RampItem(DraggableItem):
+    # --- PATH FIX: Accept macro_dir and build full path ---
+    def __init__(self,scale, deck_item=None, macro_dir="", parent=None):
+            full_texture_path = os.path.join(macro_dir, "Ramp_T.png")
+            super(RampItem, self).__init__(
+                QtCore.QRectF(0, 0, 48, 48),
+                QtGui.QColor(50, 200, 50, 200),
+                "RAMP",
+                deck_item=deck_item,
+                texture_path=full_texture_path, # Pass the full path
+                parent=parent
+            )
+
+# --- RUNTIME ERROR FIX ---
+
+# --- END FIX ---
+class RampBuilderPanel:
+    def __init__(self):
+        # This creates our QWidget and assigns it to 'self.form'
+        self.form = MainForm()
+        
+# --- RUNTIME ERROR FIX (Corrected) ---
+#if FreeCADGui.Control.getOpenTaskBar():
+#    FreeCADGui.Control.closeDialog()
+# --- END FIX ---
+
+# --- FIX: Use the Wrapper Class pattern from Program 2 ---
+# Instead of creating MainForm directly, we create the panel wrapper
+panel_wrapper = RampBuilderPanel() 
+
+# Then we pass the wrapper object to showDialog
+FreeCADGui.Control.showDialog(panel_wrapper)
+# --- END FIX ---

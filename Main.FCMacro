@@ -4,6 +4,7 @@ import FreeCADGui
 import Part
 import json
 import sys
+import math
 import os # <-- FIX: Import 'os' to build file paths
 
 # MODIFICATION: Use FreeCAD's built-in PySide, NOT PySide6
@@ -101,7 +102,7 @@ class MainForm(QtGui.QWidget):
         self.degree_input.setValidator(QtGui.QIntValidator(0, 10, parent=self))
         form_grid.addWidget(self.degree_label, 13, 0)
         form_grid.addWidget(self.degree_input, 13, 1)
-        self.heading_label = QtGui.QLabel("<h1>Gen Info</h1>")
+        self.heading_label = QtGui.QLabel("<h1>Gen Info</h1>")file:///C:/Users/Public/Desktop/Steam.lnk
         form_grid.addWidget(self.heading_label, 14, 0)
         self.point_label = QtGui.QLabel("Point Cloud Post Set (optional):")
         self.point_display = QtGui.QLineEdit()
@@ -166,15 +167,16 @@ class MainForm(QtGui.QWidget):
         Deck_Width = self.width_input.text()
         Stair_Number = self.Stair_input.text()
         Ramp_Desc = self.ramp_desc_input.text()
-        Flat_Bool = self.flat_input.isChecked()
+        Flat_Check = self.flat_input.isChecked()
         Drop_Slope = self.drop_input.text()
         Drop_Angle = self.degree_input.text()
         Point_Cloud = self.point_display.text()
-        No_Tech_Bool = self.post_input.isChecked()
+        No_Tech_Check = self.post_input.isChecked()
         errors = []
         if not Client_Name: errors.append("Client Name cannot be empty.")
         if not Site_Number: errors.append("Site Number cannot be empty.")
         if Deck_Length != "" or Deck_Width != "" or Stair_Number != "":
+            print(12234234234)
             deck=True
             if not Deck_Length: errors.append("Deck Length is required.")
             if not Deck_Width: errors.append("Deck Width is required.")
@@ -192,16 +194,17 @@ class MainForm(QtGui.QWidget):
                 "Please correct the following errors before submitting:\n\n" + "\n".join(f"* {e}" for e in errors)
             )
             return
-        Deck_Length = int(Deck_Length)
-        Deck_Width = int(Deck_Width)
-        Stair_Number = int(Stair_Number)
-        Drop_Slope = int(Drop_Slope) if Drop_Slope else None
-        Drop_Angle = int(Drop_Angle) if Drop_Angle else None
-
-        if Deck_Length > 0 and Deck_Width > 0:
+        print(str(ramp)+" "+str(deck))
+        if ramp: 
+        	Drop_Slope = int(Drop_Slope) if Drop_Slope else None
+        	Drop_Angle = int(Drop_Angle) if Drop_Angle else None
+        if deck:
+            Deck_Length = int(Deck_Length)
+            Deck_Width = int(Deck_Width)
+            Stair_Number = int(Stair_Number)
             # --- PATH FIX: Pass the macro_dir to the new window ---
             self.deck_designer_window = DeckDesignerWindow(
-                Deck_Length, Deck_Width, Stair_Number, Inches_Deck, 
+                Deck_Length, Deck_Width, Stair_Number, Inches_Deck,ramp, 
                 self.macro_dir, # Pass the path
                 parent=self
             )
@@ -209,10 +212,15 @@ class MainForm(QtGui.QWidget):
             self.deck_designer_window.show()
             print("Launched Deck Designer Window.")
             
+        if ramp and not deck:
+            # call to main ramp
+            ramp_main(Ramp_Desc,Flat_Check,Drop_Slope,Drop_Angle)
+            
+            
 
 # deck break out
 class DeckDesignerWindow(QtGui.QMainWindow):
-    def __init__(self, deck_length, deck_width, stair_count, inch, macro_dir, parent=None): # <-- FIX: Added macro_dir
+    def __init__(self, deck_length, deck_width, stair_count, inch, ramp, macro_dir, parent=None): # <-- FIX: Added macro_dir
         super(DeckDesignerWindow, self).__init__(parent)
         self.setWindowTitle(f"Deck Designer - {deck_length} x {deck_width}")
         self.setGeometry(200, 200, 1000, 800)
@@ -222,6 +230,7 @@ class DeckDesignerWindow(QtGui.QMainWindow):
         self.deck_width = deck_width
         self.stair_count = stair_count
         self.macro_dir = macro_dir # <-- FIX: Save the path
+        self.ramp = ramp
         
         self.stair_items = []
 
@@ -400,6 +409,7 @@ class DeckDesignerWindow(QtGui.QMainWindow):
         deck_item = self.deck_rect
         
         if self.stair_count > 0:
+            print(self.ramp)
             initial_x_offset = 0
             for i in range(self.stair_count):
                 # --- PATH FIX: Pass macro_dir to item ---
@@ -409,14 +419,12 @@ class DeckDesignerWindow(QtGui.QMainWindow):
                 initial_x_offset += stairs.boundingRect().width()
                 self.scene.addItem(stairs)
                 self.stair_items.append(stairs)
-        
-        # --- PATH FIX: Pass macro_dir to item ---
-        ramp = RampItem(self.inch_unit, deck_item=deck_item, macro_dir=self.macro_dir)
-        # --- END FIX ---
-        ramp_x_pos = deck_item.rect().width() - ramp.boundingRect().width()
-        ramp.setPos(ramp_x_pos, 0)
-        self.scene.addItem(ramp)
-        self.ramp_item = ramp
+        if self.ramp:
+	        ramp = RampItem(self.inch_unit, deck_item=deck_item, macro_dir=self.macro_dir)
+	        ramp_x_pos = deck_item.rect().width() - ramp.boundingRect().width()
+	        ramp.setPos(ramp_x_pos, 0)
+	        self.scene.addItem(ramp)
+	        self.ramp_item = ramp
         
 class DraggableItem(QtGui.QGraphicsRectItem):
     # --- PATH FIX: Accept macro_dir and use it to build texture_path ---
@@ -528,23 +536,55 @@ class RampItem(DraggableItem):
                 parent=parent
             )
 
-# --- RUNTIME ERROR FIX ---
 
-# --- END FIX ---
+
+def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle):
+	
+    parced_desc=desc.split(",")
+	
+    feet_of_ramp=0
+    for i in parced_desc:
+        if i == "8ft":
+            feet_of_ramp+=8
+        elif i == "12ft":
+            feet_of_ramp+=1
+        elif i == "16ft":
+            feet_of_ramp+=16
+    
+    # Slope
+    if (Drop_Slope != None): # inch of feet
+        angle_radians = math.atan(Drop_Slope / (feet_of_ramp*12))
+        angle=math.degrees(angle_radians)
+    else:
+        angle=Drop_Angle
+    
+    flat="LAN","TL","TR","UTURNL","UTURNR"
+    ramp="8ft","12ft","16ft"
+     
+    for index,part in enumerate(parced_desc):
+        
+        if (index == 1 and part in ramp)
+            
+        
+        
+        
+    
+    
+    
+    
+           
+		
+	
+    
+    		
+
+
+#
+# MAIN
+#
 class RampBuilderPanel:
     def __init__(self):
         # This creates our QWidget and assigns it to 'self.form'
         self.form = MainForm()
-        
-# --- RUNTIME ERROR FIX (Corrected) ---
-#if FreeCADGui.Control.getOpenTaskBar():
-#    FreeCADGui.Control.closeDialog()
-# --- END FIX ---
-
-# --- FIX: Use the Wrapper Class pattern from Program 2 ---
-# Instead of creating MainForm directly, we create the panel wrapper
 panel_wrapper = RampBuilderPanel() 
-
-# Then we pass the wrapper object to showDialog
 FreeCADGui.Control.showDialog(panel_wrapper)
-# --- END FIX ---

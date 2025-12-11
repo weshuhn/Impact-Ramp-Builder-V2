@@ -102,7 +102,7 @@ class MainForm(QtGui.QWidget):
         self.degree_input.setValidator(QtGui.QIntValidator(0, 10, parent=self))
         form_grid.addWidget(self.degree_label, 13, 0)
         form_grid.addWidget(self.degree_input, 13, 1)
-        self.heading_label = QtGui.QLabel("<h1>Gen Info</h1>")file:///C:/Users/Public/Desktop/Steam.lnk
+        self.heading_label = QtGui.QLabel("<h1>Gen Info</h1>")
         form_grid.addWidget(self.heading_label, 14, 0)
         self.point_label = QtGui.QLabel("Point Cloud Post Set (optional):")
         self.point_display = QtGui.QLineEdit()
@@ -536,18 +536,19 @@ class RampItem(DraggableItem):
                 parent=parent
             )
 
+#def import_part_ramp():
+    
 
 
 def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle):
-	
+    parts_to_import= {}
     parced_desc=desc.split(",")
-	
     feet_of_ramp=0
     for i in parced_desc:
         if i == "8ft":
             feet_of_ramp+=8
         elif i == "12ft":
-            feet_of_ramp+=1
+            feet_of_ramp+=12
         elif i == "16ft":
             feet_of_ramp+=16
     
@@ -560,24 +561,61 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle):
     
     flat="LAN","TL","TR","UTURNL","UTURNR"
     ramp="8ft","12ft","16ft"
-     
+    #
+    # Allways send angle
     for index,part in enumerate(parced_desc):
-        
-        if (index == 1 and part in ramp)
-            
-        
-        
-        
-    
-    
-    
-    
-           
-		
-	
-    
-    		
-
+      
+         
+        if index > 0:  	
+        	part_before = parced_desc[index - 1]
+        if index < len(parced_desc) - 1:
+        	part_after = parced_desc[index + 1]
+        # if part first
+        print("inde x  "+str(index))
+        if (index == 0):
+            if (part in ramp):
+            	if (part_after in flat):
+                		# 05_XX_05
+            		parts_to_import[index]="A_"+part+"_A"
+            	elif (part_after in ramp):
+                   		# 05_XX
+                   		parts_to_import[index]="A_GGGGG"+part
+            else:
+            	parts_to_import[index]=part
+        # Last // ENDING   
+        elif (index == len(parced_desc)-1):
+            if (part_before in flat):
+                # 05_XX_ ENDING
+                parts_to_import[index]="A_"+part+"END"
+            else:
+                # __XX_ ENDING
+                parts_to_import[index]=""+part+"END"
+        #normal
+        # btween 2 flat
+        elif (part_before in flat and part in ramp and part_after in flat):
+        	# 05_XX_05
+        	parts_to_import[index]="A_"+part+"_A"
+        # one side angled:
+        elif (((part_before in flat) or (part_after in flat)) and part in ramp):
+            print("TEST")
+            if (part_before in flat):
+                # 05_XX
+                parts_to_import[index]="A_"+part
+            else:
+                # XX_05
+                parts_to_import[index]=part+"A_"
+        elif (part_before in ramp and part in ramp and part_after in ramp):
+            # XX normal RAMP
+            parts_to_import[index]=part
+        elif (part in flat):
+            # place flats
+            parts_to_import[index]=part
+        else:
+            print("NO NO NO NO - A part was NOT imported HELP HELP HELP"+part)
+                
+        # list
+    for key,value in parts_to_import.items():
+        print(value)
 
 #
 # MAIN

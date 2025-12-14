@@ -5,7 +5,8 @@ import Part
 import json
 import sys
 import math
-import os # <-- FIX: Import 'os' to build file paths
+import shutil
+import os
 
 # MODIFICATION: Use FreeCAD's built-in PySide, NOT PySide6
 from PySide import QtCore, QtGui
@@ -214,7 +215,7 @@ class MainForm(QtGui.QWidget):
             
         if ramp and not deck:
             # call to main ramp
-            ramp_main(Ramp_Desc,Flat_Check,Drop_Slope,Drop_Angle)
+            ramp_main(Ramp_Desc,Flat_Check,Drop_Slope,Drop_Angle,Client_Name,Site_Number)
             
             
 
@@ -535,12 +536,68 @@ class RampItem(DraggableItem):
                 texture_path=full_texture_path, # Pass the full path
                 parent=parent
             )
+            
 
-#def import_part_ramp():
+def import_ramp_part(main_file,index, part, start_angle, end_angle):
+    
+    #
+    # ADD SUPORT FOR ALL PARTS
+    #
+    
+    
+    # copy file
+    file_path = r"C:\Users\weshu\OneDrive\Desktop\IMPACT Assets\Big Rework\Parts\All parts made\8ft_Main.FCStd"
+    temp_file = "C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/" + str(index) + "_" + part + ".FCStd"
+    
+    doc = App.openDocument(file_path)
+    
+    doc.saveCopy(temp_file)
+    
+    # Set copy as new file
+    doc = App.openDocument(temp_file)
+    
+    sheet = doc.getObject("Spreadsheet001")
+    
+    sheet.set("start_angle", str(start_angle))
+    sheet.set("end_angle", str(end_angle))
+    
+    
+    # CYB checking for Assembly
+    main_doc = App.openDocument(main_file)
+    main_doc = App.ActiveDocument
+    
+    if not main_doc.getObject("Assembly"):
+        main_asm = main_doc.addObject("Assembly::Container", "Assembly")
+    else:
+        main_asm = main_doc.getObject("Assembly")
+        
+    sub_doc = App.openDocument(temp_file)
+    sub_assembly_obj = None
+    for obj in sub_doc.Objects:
+        if obj.isDerivedFrom("Assembly::Container"):
+            sub_assembly_obj = obj
+            break
+    
+    if sub_assembly_obj:
+        nested_link = main_doc.addObject("App::Link", "SubAssembly_Import")
+        nested_link.LinkedObject = sub_assembly_obj
+    
+        # Move the link into the Main Assembly container
+        main_asm.addObject(nested_link)
+    
+        print(f"Successfully nested {sub_doc.Label} into Main Assembly.")
+    else:
+        print("Could not find an Assembly container in the sub-file.")
+
+    main_doc.recompute()
+        
+    
+    
+    
     
 
-
-def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle):
+    
+def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     parts_to_import= {}
     parced_desc=desc.split(",")
     feet_of_ramp=0
@@ -559,13 +616,19 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle):
     else:
         angle=Drop_Angle
     
+    # CREATING THE MASTER Assembly
+    main_file = f"C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/{client}_{site_number}.FCStd"
+    doc = App.newDocument(f"{client}_{site_number}")
+    Gui.activateWorkbench("AssemblyWorkbench")
+    asm = doc.addObject("Assembly::Container", "Assembly")
+    doc.recompute()
+    doc.saveAs(main_file)
     flat="LAN","TL","TR","UTURNL","UTURNR"
     ramp="8ft","12ft","16ft"
     #
     # Allways send angle
     for index,part in enumerate(parced_desc):
       
-         
         if index > 0:  	
         	part_before = parced_desc[index - 1]
         if index < len(parced_desc) - 1:
@@ -579,17 +642,17 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle):
             		parts_to_import[index]="A_"+part+"_A"
             	elif (part_after in ramp):
                    		# 05_XX
-                   		parts_to_import[index]="A_GGGGG"+part
+                   		parts_to_import[index]="A_"+part
             else:
             	parts_to_import[index]=part
         # Last // ENDING   
         elif (index == len(parced_desc)-1):
             if (part_before in flat):
                 # 05_XX_ ENDING
-                parts_to_import[index]="A_"+part+"END"
+                parts_to_import[index]="A_"+part+"_END"
             else:
                 # __XX_ ENDING
-                parts_to_import[index]=""+part+"END"
+                parts_to_import[index]=""+part+"_END"
         #normal
         # btween 2 flat
         elif (part_before in flat and part in ramp and part_after in flat):
@@ -600,10 +663,10 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle):
             print("TEST")
             if (part_before in flat):
                 # 05_XX
-                parts_to_import[index]="A_"+part
+                parts_to_import[index]="_A"+part
             else:
                 # XX_05
-                parts_to_import[index]=part+"A_"
+                parts_to_import[index]=part+"_A"
         elif (part_before in ramp and part in ramp and part_after in ramp):
             # XX normal RAMP
             parts_to_import[index]=part
@@ -615,7 +678,45 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle):
                 
         # list
     for key,value in parts_to_import.items():
-        print(value)
+        if  "8ft" in value:
+            if "A_8ft_A" == value:
+                import_ramp_part(main_file,key,"8ft",angle,angle)
+            elif "A_8ft" == value:
+                import_ramp_part(main_file,key,"8ft",angle,0)
+            elif "8ft_A" == value:
+                import_ramp_part(main_file,key,"8ft",0,angle)
+            elif "8ft" == value:
+                import_ramp_part(main_file,key,"8ft",0,0)
+            elif "end" in value:
+                #A_"+part+"END
+                #"+part+"END
+                if ending_flat:
+                    if "A_8f_END":
+                        print("someing")
+                    elif "8ft_END":
+                        print("see")
+                    else:
+                        print("BAD BAD BAD : "+value)
+                else:
+                    if "A_8f_END":
+                        print("someing")
+                    elif "8ft_END":
+                        print("see")
+                    else:
+                        print("BAD BAD BAD : "+value)
+            else:
+                print("BAD BAD BAD : "+value)
+        elif  "12ft" in value:
+            print("hui")
+        elif  "16ft" in value:         
+            print("hui")       
+            
+    #
+    # BUILD THAT RAMP!!
+    #
+    
+    
+    
 
 #
 # MAIN

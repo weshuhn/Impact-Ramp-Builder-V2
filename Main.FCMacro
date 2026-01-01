@@ -8,6 +8,133 @@ import math
 import shutil
 import os
 
+class box():
+    # DOSE NOT COUNT FOR 12 and 16 foot middle posts
+    # need special ending stuff
+    # current x y starts at 0, change based of last index
+    def __init__(self,current_x,current_y,index,name,length=0,width=0):
+        self.LW_dict={
+        "8ft":{"length":96,"width":48},
+        "12ft":{"length":144,"width":48},
+        "16ft":{"length":192,"width":48},
+        "LAN":{"length":48,"width":48},
+        "TL":{"length":192,"width":48},
+        "TR":{"length":192,"width":48},
+        "UTURN":{"length":192,"width":48}
+        } # FINIYSH UTURNS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        self.current_x=current_x
+        self.current_y=current_y
+        self.name=name
+        self.index=index
+        # 05_XX_05 SPLIT
+        parts = name.split("_")
+        parts += [None] * (3 - len(parts))
+        self.start, self.type, self.end = parts[:3]
+        if length != 0 or width != 0:
+        	self.width=width
+        	self.length=length
+        else:
+          dims = self.LW_dict["8ft"]
+          self.length = dims["length"]
+          self.width = dims["width"]
+        # center of post
+        self.cords = {
+        "Back_Left": {"x":0,"y":0},
+        "Back_Right": {"x":0,"y":0},
+        "Top_Left": {"x":0,"y":0},
+        "Top_Right":{"x":0,"y":0}
+        }
+        self.set_BL()
+        self.set_BR()
+        self.set_TL()
+        self.set_TR()
+    # X__0
+    # |  |
+    # |  |
+    # 0__0
+    def set_BL(self):
+        if (self.start == "05"):
+            # FLUSH
+            X_offset=-1.75
+            Y_offset=-1.75 
+        else:
+            # OFFSET
+            X_offset=-1.75
+            Y_offset=0
+        # cal
+        point_X=self.current_x-self.width+X_offset
+        point_Y=self.current_y+Y_offset
+        # set
+        self.cords["Back_Left"]["x"] = point_X
+        self.cords["Back_Left"]["y"] = point_Y
+    # 0__X
+    # |  |
+    # |  |
+    # 0__0
+    def set_BR(self):
+        if (self.start == "05"):
+            # Flush
+            X_offset=+1.75
+            Y_offset=-1.75
+        else:
+            # OFFSET
+            X_offset=+1.75
+            Y_offset=0        
+        # cal
+        point_X=self.current_x+X_offset
+        point_Y=self.current_y+Y_offset
+        # set
+        self.cords["Back_Right"]["x"] = point_X
+        self.cords["Back_Right"]["y"] = point_Y
+    # 0__0
+    # |  |
+    # |  |
+    # X__0
+    def set_TL(self):
+        if (self.end == "05"):
+            # Flush
+            X_offset=-1.75
+            Y_offset=-1.75
+        else:
+            # OFFSET
+            X_offset=-1.75
+            Y_offset=0        
+        # cal
+        point_X=self.current_x-self.width+X_offset
+        point_Y=self.current_y-self.length+Y_offset
+        # set
+        self.cords["Top_Left"]["x"] = point_X
+        self.cords["Top_Left"]["y"] = point_Y   
+    # 0__0
+    # |  |
+    # |  |
+    # 0__X
+    def set_TR(self):
+        if (self.end == "05"):
+            # Flush
+            X_offset=+1.75
+            Y_offset=-1.75
+        else:
+            # OFFSET
+            X_offset=+1.75
+            Y_offset=0        
+        # cal
+        point_X=self.current_x+X_offset
+        point_Y=self.current_y-self.length+Y_offset
+        # set
+        self.cords["Top_Right"]["x"] = point_X
+        self.cords["Top_Right"]["y"] = point_Y   
+   
+    def get_BL(self):
+        return self.cords[Back_Left]
+    
+    def get_BR(self):
+        return self.cords[Back_Right]
+    def get_TL(self):
+        return self.cords[Top_Left]
+    def get_TR(self):
+        return self.cords[Top_right]    
+
 # MODIFICATION: Use FreeCAD's built-in PySide, NOT PySide6
 from PySide import QtCore, QtGui
 
@@ -216,7 +343,6 @@ class MainForm(QtGui.QWidget):
         if ramp and not deck:
             # call to main ramp
             ramp_main(Ramp_Desc,Flat_Check,Drop_Slope,Drop_Angle,Client_Name,Site_Number)
-            
             
 
 # deck break out
@@ -594,7 +720,8 @@ def import_ramp_part(main_file,index, part, start_angle, end_angle):
     
     
     
-    
+def dest_point(point_list):
+    print(point_list)
 
     
 def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
@@ -640,6 +767,7 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
             	if (part_after in flat):
                 		# 05_XX_05
             		parts_to_import[index]="A_"+part+"_A"
+            		box() ###############################################################
             	elif (part_after in ramp):
                    		# 05_XX
                    		parts_to_import[index]="A_"+part
@@ -675,9 +803,40 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
             parts_to_import[index]=part
         else:
             print("NO NO NO NO - A part was NOT imported HELP HELP HELP"+part)
-                
-        # list
+    
+    # ramp for maping posts : length, width, num of connections
+    
+    ref_b = {
+    "8ft": {
+    "length": 96,
+    "width" : 48,
+    "NFC": 4
+    },
+    "12ft":{
+    "length": 144,
+    "width" : 48,
+    "NFC": 6
+    },
+    "16ft":{
+    "length": 192,
+    "width" : 48,
+    "NFC": 6    
+    }
+    # ADD MORE =)
+    }
+    
+    map={}
+    
     for key,value in parts_to_import.items():
+        
+        #
+        # RAMP POST alg
+        #
+        
+        
+        
+        
+        
         if  "8ft" in value:
             if "A_8ft_A" == value:
                 import_ramp_part(main_file,key,"8ft",angle,angle)
@@ -710,10 +869,6 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
             print("hui")
         elif  "16ft" in value:         
             print("hui")       
-            
-    #
-    # BUILD THAT RAMP!!
-    #
     
     
     
@@ -723,7 +878,6 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
 #
 class RampBuilderPanel:
     def __init__(self):
-        # This creates our QWidget and assigns it to 'self.form'
         self.form = MainForm()
 panel_wrapper = RampBuilderPanel() 
 FreeCADGui.Control.showDialog(panel_wrapper)

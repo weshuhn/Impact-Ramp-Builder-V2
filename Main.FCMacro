@@ -1,142 +1,103 @@
 # FreeCAD and PySide Imports
 import FreeCAD
 import FreeCADGui
+import Assembly
 import Part
 import json
 import sys
 import math
 import shutil
 import os
+import math
+from PySide import QtCore, QtGui
 
-class box():
-    # DOSE NOT COUNT FOR 12 and 16 foot middle posts
-    # need special ending stuff
-    # current x y starts at 0, change based of last index
-    def __init__(self,current_x,current_y,index,name,length=0,width=0):
-        self.LW_dict={
-        "8ft":{"length":96,"width":48},
-        "12ft":{"length":144,"width":48},
-        "16ft":{"length":192,"width":48},
-        "LAN":{"length":48,"width":48},
-        "TL":{"length":192,"width":48},
-        "TR":{"length":192,"width":48},
-        "UTURN":{"length":192,"width":48}
-        } # FINIYSH UTURNS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        self.current_x=current_x
-        self.current_y=current_y
-        self.name=name
-        self.index=index
-        # 05_XX_05 SPLIT
+class Box:
+    def __init__(self, current_x, current_y, index, name,heading, length=0, width=0):
+        self.LW_dict = {
+            "8ft": {"length": 96, "width": 48},
+            "12ft": {"length": 144, "width": 48},
+            "16ft": {"length": 192, "width": 48},
+            "LAN": {"length": 48, "width": 48},
+            "TL": {"length": 60, "width": 60}, # Example Turn Landing size
+            "TR": {"length": 60, "width": 60},
+            "UTURN": {"length": 60, "width": 96} # U-turns are usually double width
+        }
+        
+        self.current_x = current_x
+        self.current_y = current_y
+        self.index = index
+        self.name = name
+        self.heading = heading % 360 # 0, 90, 180, 270
+        
+        # Parse the 05_XX_05 naming convention
         parts = name.split("_")
         parts += [None] * (3 - len(parts))
         self.start, self.type, self.end = parts[:3]
-        if length != 0 or width != 0:
-        	self.width=width
-        	self.length=length
-        else:
-          dims = self.LW_dict["8ft"]
-          self.length = dims["length"]
-          self.width = dims["width"]
-        # center of post
-        self.cords = {
-        "Back_Left": {"x":0,"y":0},
-        "Back_Right": {"x":0,"y":0},
-        "Top_Left": {"x":0,"y":0},
-        "Top_Right":{"x":0,"y":0}
-        }
-        self.set_BL()
-        self.set_BR()
-        self.set_TL()
-        self.set_TR()
-    # X__0
-    # |  |
-    # |  |
-    # 0__0
-    def set_BL(self):
-        if (self.start == "05"):
-            # FLUSH
-            X_offset=-1.75
-            Y_offset=-1.75 
-        else:
-            # OFFSET
-            X_offset=-1.75
-            Y_offset=0
-        # cal
-        point_X=self.current_x-self.width+X_offset
-        point_Y=self.current_y+Y_offset
-        # set
-        self.cords["Back_Left"]["x"] = point_X
-        self.cords["Back_Left"]["y"] = point_Y
-    # 0__X
-    # |  |
-    # |  |
-    # 0__0
-    def set_BR(self):
-        if (self.start == "05"):
-            # Flush
-            X_offset=+1.75
-            Y_offset=-1.75
-        else:
-            # OFFSET
-            X_offset=+1.75
-            Y_offset=0        
-        # cal
-        point_X=self.current_x+X_offset
-        point_Y=self.current_y+Y_offset
-        # set
-        self.cords["Back_Right"]["x"] = point_X
-        self.cords["Back_Right"]["y"] = point_Y
-    # 0__0
-    # |  |
-    # |  |
-    # X__0
-    def set_TL(self):
-        if (self.end == "05"):
-            # Flush
-            X_offset=-1.75
-            Y_offset=-1.75
-        else:
-            # OFFSET
-            X_offset=-1.75
-            Y_offset=0        
-        # cal
-        point_X=self.current_x-self.width+X_offset
-        point_Y=self.current_y-self.length+Y_offset
-        # set
-        self.cords["Top_Left"]["x"] = point_X
-        self.cords["Top_Left"]["y"] = point_Y   
-    # 0__0
-    # |  |
-    # |  |
-    # 0__X
-    def set_TR(self):
-        if (self.end == "05"):
-            # Flush
-            X_offset=+1.75
-            Y_offset=-1.75
-        else:
-            # OFFSET
-            X_offset=+1.75
-            Y_offset=0        
-        # cal
-        point_X=self.current_x+X_offset
-        point_Y=self.current_y-self.length+Y_offset
-        # set
-        self.cords["Top_Right"]["x"] = point_X
-        self.cords["Top_Right"]["y"] = point_Y   
-   
-    def get_BL(self):
-        return self.cords[Back_Left]
-    
-    def get_BR(self):
-        return self.cords[Back_Right]
-    def get_TL(self):
-        return self.cords[Top_Left]
-    def get_TR(self):
-        return self.cords[Top_right]    
 
-# MODIFICATION: Use FreeCAD's built-in PySide, NOT PySide6
-from PySide import QtCore, QtGui
+        # KEEP CUSTOM LENGTH/WIDTH LOGIC
+        if length != 0 or width != 0:
+            self.width = width
+            self.length = length
+        else:
+            # Fallback to dictionary based on the "type" from the name
+            lookup_key = self.type if self.type in self.LW_dict else "8ft"
+            dims = self.LW_dict[lookup_key]
+            self.length = dims["length"]
+            self.width = dims["width"]
+
+        self.cords = {
+            "Back_Left": {"x": 0, "y": 0},
+            "Back_Right": {"x": 0, "y": 0},
+            "Top_Left": {"x": 0, "y": 0},
+            "Top_Right": {"x": 0, "y": 0},
+            "Mid_Left": None, # For 12ft and 16ft support
+            "Mid_Right": None
+        }
+
+        # Run calculations
+        self.calculate_all_posts()
+
+    def rotate_point(self, local_x, local_y):
+        """Converts local box coordinates to global grid coordinates based on heading"""
+        rad = math.radians(self.heading)
+        # Rotation Matrix
+        rot_x = local_x * math.cos(rad) - local_y * math.sin(rad)
+        rot_y = local_x * math.sin(rad) + local_y * math.cos(rad)
+        
+        return (self.current_x + rot_x, self.current_y + rot_y)
+
+    def calculate_all_posts(self):
+        # 1. Determine local offsets (distance from the "Center Line" of the ramp)
+        # We assume current_x/y is the center of the start edge
+        half_w = self.width / 2
+        
+        # Start (Back) Offset Logic
+        start_y_off = 1.75 if self.start == "05" else 0
+        # End (Top) Offset Logic
+        end_y_off = 1.75 if self.end == "05" else 0
+
+        # BACK LEFT (Local)
+        bl_x, bl_y = self.rotate_point(-(half_w - 1.75), start_y_off)
+        self.cords["Back_Left"] = {"x": bl_x, "y": bl_y}
+
+        # BACK RIGHT (Local)
+        br_x, br_y = self.rotate_point((half_w - 1.75), start_y_off)
+        self.cords["Back_Right"] = {"x": br_x, "y": br_y}
+
+        # TOP LEFT (Local)
+        tl_x, tl_y = self.rotate_point(-(half_w - 1.75), self.length - end_y_off)
+        self.cords["Top_Left"] = {"x": tl_x, "y": tl_y}
+
+        # TOP RIGHT (Local)
+        tr_x, tr_y = self.rotate_point((half_w - 1.75), self.length - end_y_off)
+        self.cords["Top_Right"] = {"x": tr_x, "y": tr_y}
+
+        # MIDDLE POSTS (For 12ft and 16ft)
+        if self.length > 96:
+            ml_x, ml_y = self.rotate_point(-(half_w - 1.75), self.length / 2)
+            mr_x, mr_y = self.rotate_point((half_w - 1.75), self.length / 2)
+            self.cords["Mid_Left"] = {"x": ml_x, "y": ml_y}
+            self.cords["Mid_Right"] = {"x": mr_x, "y": mr_y} 
 
 class MainForm(QtGui.QWidget):
     def __init__(self):
@@ -664,64 +625,76 @@ class RampItem(DraggableItem):
             )
             
 
-def import_ramp_part(main_file,index, part, start_angle, end_angle):
+def import_ramp_part(main_file_path, index, part, start_angle, end_angle):
+    # 1. Setup paths
+    source_file = r"C:\Users\weshu\OneDrive\Desktop\IMPACT Assets\Big Rework\Parts\All parts made\8ft_Main.FCStd"
+    temp_file = f"C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/{index}_{part}.FCStd"
     
-    #
-    # ADD SUPORT FOR ALL PARTS
-    #
+    # 2. Create the modified part file
+    # We open the source, save a copy, close source, open the copy
+    src_doc = App.openDocument(source_file)
+    src_doc.saveCopy(temp_file)
+    App.closeDocument(src_doc.Name)
     
-    
-    # copy file
-    file_path = r"C:\Users\weshu\OneDrive\Desktop\IMPACT Assets\Big Rework\Parts\All parts made\8ft_Main.FCStd"
-    temp_file = "C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/" + str(index) + "_" + part + ".FCStd"
-    
-    doc = App.openDocument(file_path)
-    
-    doc.saveCopy(temp_file)
-    
-    # Set copy as new file
-    doc = App.openDocument(temp_file)
-    
-    sheet = doc.getObject("Spreadsheet001")
-    
-    sheet.set("start_angle", str(start_angle))
-    sheet.set("end_angle", str(end_angle))
-    
-    
-    # CYB checking for Assembly
-    main_doc = App.openDocument(main_file)
-    main_doc = App.ActiveDocument
-    
-    if not main_doc.getObject("Assembly"):
-        main_asm = main_doc.addObject("Assembly::Container", "Assembly")
-    else:
-        main_asm = main_doc.getObject("Assembly")
-        
     sub_doc = App.openDocument(temp_file)
-    sub_assembly_obj = None
+    
+    # 3. Update Spreadsheet values
+    sheet = sub_doc.getObject("Spreadsheet001")
+    if sheet:
+        sheet.set("start_angle", str(start_angle))
+        sheet.set("end_angle", str(end_angle))
+        sub_doc.recompute()
+    sub_doc.save() # Ensure changes are written to disk
+
+    # 4. Get the Main Assembly Document
+    # Use openDocument to get the object, then ensure we have the Assembly container
+    main_doc = App.openDocument(main_file_path)
+    main_asm = main_doc.getObject("Assembly") # This is the object we created in the last step
+    
+    if not main_asm:
+        print("Error: Main Assembly container not found in the main file.")
+        return
+
+    # 5. Create a Link to the sub-document's content
+    # In the integrated workbench, we usually link the 'Assembly' object of the sub-file
+    sub_asm_obj = None
     for obj in sub_doc.Objects:
-        if obj.isDerivedFrom("Assembly::Container"):
-            sub_assembly_obj = obj
+        # Check for the correct type we discovered: Assembly::AssemblyObject
+        if obj.isDerivedFrom("Assembly::AssemblyObject") or obj.isDerivedFrom("Part::Feature"):
+            sub_asm_obj = obj
             break
-    
-    if sub_assembly_obj:
-        nested_link = main_doc.addObject("App::Link", "SubAssembly_Import")
-        nested_link.LinkedObject = sub_assembly_obj
-    
+
+    if sub_asm_obj:
+        # Create an App::Link in the Main Document
+        link_name = f"Link_{part}_{index}"
+        nested_link = main_doc.addObject("App::Link", link_name)
+        nested_link.LinkedObject = sub_asm_obj
+        
         # Move the link into the Main Assembly container
-        main_asm.addObject(nested_link)
+        main_asm.Group = main_asm.Group + [nested_link]
     
-        print(f"Successfully nested {sub_doc.Label} into Main Assembly.")
+        print(f"Successfully linked {part} into Main Assembly.")
     else:
-        print("Could not find an Assembly container in the sub-file.")
+        print(f"Could not find a valid object to link in {temp_file}")
 
     main_doc.recompute()
+    main_doc.save()
         
-    
-    
-    
-def dest_point(point_list):
-    print(point_list)
+
+def advance_cursor(x, y, heading_deg, forward, lateral=0.0):
+    rad = math.radians(heading_deg)
+
+    # Forward along heading
+    x_fwd = x + forward * math.cos(rad)
+    y_fwd = y + forward * math.sin(rad)
+
+    # Lateral left/right (left is +, right is -)
+    # Left vector = heading rotated +90° → (-sin, +cos)
+    x_lat = x_fwd + lateral * (-math.sin(rad))
+    y_lat = y_fwd + lateral * ( math.cos(rad))
+
+    return x_lat, y_lat
+
 
     
 def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
@@ -743,17 +716,58 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     else:
         angle=Drop_Angle
     
+    
+    
     # CREATING THE MASTER Assembly
-    main_file = f"C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/{client}_{site_number}.FCStd"
+    
+
+    # 1. Force the Assembly Module to initialize
+    # This registers 'Assembly::AssemblyObject' so addObject can find it
+    try:
+        import Assembly
+        # Some versions require the Workbench to be initialized to register types
+        if App.GuiUp:
+            Gui.activateWorkbench("AssemblyWorkbench")
+    except ImportError:
+        App.Console.PrintError("Assembly Workbench not found. Please ensure FreeCAD 1.0+ is installed.\n")
+
+    # 2. Create your document
     doc = App.newDocument(f"{client}_{site_number}")
-    Gui.activateWorkbench("AssemblyWorkbench")
-    asm = doc.addObject("Assembly::Container", "Assembly")
-    doc.recompute()
+
+    # 3. Create the Assembly Container using the formal Wiki type
+    try:
+        # Based on the documentation: 'Assembly::AssemblyObject'
+        asm = doc.addObject("Assembly::AssemblyObject", "Assembly")
+        asm.Label = f"Assembly_{client}"
+    
+    # Trigger a recompute to generate the default 'Origin' and 'Joints' 
+    # containers mentioned in the wiki.
+        doc.recompute()
+    
+    except Exception as e:
+        App.Console.PrintError(f"Error creating assembly object: {str(e)}\n")
+
+    # 4. Save the file
+    main_file = f"C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/{client}_{site_number}.FCStd"
     doc.saveAs(main_file)
+    
+    
+    
+    
+    
+    
+    
+    
+    
     flat="LAN","TL","TR","UTURNL","UTURNR"
     ramp="8ft","12ft","16ft"
+    boxes={}
+    current_x = 0
+    current_y = 0
+    current_heading = 0
     #
     # Allways send angle
+    # current_x, current_y, index, name, length=0, width=0, heading=0
     for index,part in enumerate(parced_desc):
       
         if index > 0:  	
@@ -763,69 +777,88 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
         # if part first
         print("inde x  "+str(index))
         if (index == 0):
+            current_x=0
+            current_y=0
             if (part in ramp):
             	if (part_after in flat):
                 		# 05_XX_05
             		parts_to_import[index]="A_"+part+"_A"
-            		box() ###############################################################
+            		boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part+"_A",current_heading)
             	elif (part_after in ramp):
                    		# 05_XX
                    		parts_to_import[index]="A_"+part
+                   		boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part,current_heading)
             else:
             	parts_to_import[index]=part
+            	boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part,current_heading)
         # Last // ENDING   
         elif (index == len(parced_desc)-1):
             if (part_before in flat):
                 # 05_XX_ ENDING
                 parts_to_import[index]="A_"+part+"_END"
+                boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part+"_END",current_heading)
             else:
                 # __XX_ ENDING
                 parts_to_import[index]=""+part+"_END"
+                boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part+"_END",current_heading)
         #normal
         # btween 2 flat
         elif (part_before in flat and part in ramp and part_after in flat):
         	# 05_XX_05
         	parts_to_import[index]="A_"+part+"_A"
+        	boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part+"_A",current_heading)
         # one side angled:
         elif (((part_before in flat) or (part_after in flat)) and part in ramp):
-            print("TEST")
             if (part_before in flat):
                 # 05_XX
                 parts_to_import[index]="_A"+part
+                boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"_A"+part,current_heading)
             else:
                 # XX_05
                 parts_to_import[index]=part+"_A"
+                boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part+"_A",current_heading)
         elif (part_before in ramp and part in ramp and part_after in ramp):
             # XX normal RAMP
             parts_to_import[index]=part
+            boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part,current_heading)
         elif (part in flat):
             # place flats
             parts_to_import[index]=part
+            boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part,current_heading)
         else:
             print("NO NO NO NO - A part was NOT imported HELP HELP HELP"+part)
-    
-    # ramp for maping posts : length, width, num of connections
-    
-    ref_b = {
-    "8ft": {
-    "length": 96,
-    "width" : 48,
-    "NFC": 4
-    },
-    "12ft":{
-    "length": 144,
-    "width" : 48,
-    "NFC": 6
-    },
-    "16ft":{
-    "length": 192,
-    "width" : 48,
-    "NFC": 6    
-    }
-    # ADD MORE =)
-    }
-    
-    map={}
+        # curs
+        # should always be the top center line
+        length = boxes[f"{index}_{part}"].length
+        width = boxes[f"{index}_{part}"].width
+
+        # Compute movement and heading updates per part type
+        if part in ("8ft", "12ft", "16ft", "LAN"):
+        # Straight run or inline landing: advance full length
+            current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length, lateral=0.0)
+
+        elif part == "TL":
+            # 90° left turn landing: half forward, then left by width/2, then rotate left
+            current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length/2.0, lateral=+width/2.0)
+            current_heading = (current_heading - 90) % 360
+
+        elif part == "TR":
+            # 90° right turn landing: half forward, then right by width/2, then rotate right
+            current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length/2.0, lateral=-width/2.0)
+            current_heading = (current_heading + 90) % 360
+
+        elif part == "UTURN":
+           # 180° turn landing: choose your intent.
+           # Option A (exit from far edge center): full forward, then rotate 180°
+           current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length, lateral=0.0)
+           current_heading = (current_heading + 180) % 360
+
+           # Option B (exit from midline): half forward, rotate 180°
+           # current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length/2.0, lateral=0.0)
+           # current_heading = (current_heading + 180) % 360
+
+        else:
+           print("Unknown part type for cursor logic:", part)
     
     for key,value in parts_to_import.items():
         

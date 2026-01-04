@@ -3,6 +3,7 @@ import FreeCAD
 import FreeCADGui
 import Assembly
 import Part
+import time
 import json
 import sys
 import math
@@ -283,7 +284,8 @@ class MainForm(QtGui.QWidget):
                 "Please correct the following errors before submitting:\n\n" + "\n".join(f"* {e}" for e in errors)
             )
             return
-        print(str(ramp)+" "+str(deck))
+
+        
         if ramp: 
         	Drop_Slope = int(Drop_Slope) if Drop_Slope else None
         	Drop_Angle = int(Drop_Angle) if Drop_Angle else None
@@ -303,6 +305,7 @@ class MainForm(QtGui.QWidget):
             
         if ramp and not deck:
             # call to main ramp
+            Gui.Control.closeDialog()
             ramp_main(Ramp_Desc,Flat_Check,Drop_Slope,Drop_Angle,Client_Name,Site_Number)
             
 
@@ -629,7 +632,7 @@ def import_ramp_part(main_file_path, index, part, start_angle, end_angle):
     # 1. Setup paths
     source_file = r"C:\Users\weshu\OneDrive\Desktop\IMPACT Assets\Big Rework\Parts\All parts made\8ft_Main.FCStd"
     temp_file = f"C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/{index}_{part}.FCStd"
-    
+    nested_link = None
     # 2. Create the modified part file
     # We open the source, save a copy, close source, open the copy
     src_doc = App.openDocument(source_file)
@@ -660,7 +663,7 @@ def import_ramp_part(main_file_path, index, part, start_angle, end_angle):
     sub_asm_obj = None
     for obj in sub_doc.Objects:
         # Check for the correct type we discovered: Assembly::AssemblyObject
-        if obj.isDerivedFrom("Assembly::AssemblyObject") or obj.isDerivedFrom("Part::Feature"):
+        if obj.isDerivedFrom("Assembly::AssemblyObject"):
             sub_asm_obj = obj
             break
 
@@ -679,6 +682,7 @@ def import_ramp_part(main_file_path, index, part, start_angle, end_angle):
 
     main_doc.recompute()
     main_doc.save()
+    return nested_link
         
 
 def advance_cursor(x, y, heading_deg, forward, lateral=0.0):
@@ -695,6 +699,50 @@ def advance_cursor(x, y, heading_deg, forward, lateral=0.0):
 
     return x_lat, y_lat
 
+
+def find_joint_group(asm_obj):
+    """Return the Assembly::JointGroup child of the assembly."""
+    for child in getattr(asm_obj, "Group", []):
+        tid = getattr(child, "TypeId", "")
+        if tid == "Assembly::JointGroup" or child.isDerivedFrom("Assembly::JointGroup"):
+            return child
+    return None
+
+def create_fixed_joint_between_links(doc, asm, joints_grp, link_a, link_b,
+                                     sub_a="Binder_End", sub_b="Binder_Start",
+                                     label=None):
+    """
+    Create a Fixed Joint between two App::Link instances that live under the master assembly.
+    Selection is made on the master links, then the Assembly 'Fixed Joint' command is run.
+    """
+    # Build selection on the master links (not the source file objects)
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(doc.Name, link_a.Name, sub_a)
+    Gui.Selection.addSelection(doc.Name, link_b.Name, sub_b)
+
+    # Make master assembly the active edit context so the joint lands in its JointGroup
+    try:
+        Gui.ActiveDocument.setEdit(asm)
+    except Exception:
+        pass
+
+    before = len(joints_grp.Group)
+    Gui.runCommand('Assembly_CreateJointFixed')  # Assembly → Fixed Joint
+    doc.recompute()
+    after = len(joints_grp.Group)
+
+    if after <= before:
+        FreeCAD.Console.PrintError(
+            f"Joint creation failed for {link_a.Name} → {link_b.Name} (sub: {sub_a}, {sub_b})\n"
+        )
+        return None
+
+    new_joint = joints_grp.Group[-1]
+    new_joint.Type = "Fixed"  # command sets it; enforce for clarity
+    if label:
+        new_joint.Label = label
+    doc.recompute()
+    return new_joint
 
     
 def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
@@ -750,14 +798,6 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     # 4. Save the file
     main_file = f"C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/{client}_{site_number}.FCStd"
     doc.saveAs(main_file)
-    
-    
-    
-    
-    
-    
-    
-    
     
     flat="LAN","TL","TR","UTURNL","UTURNR"
     ramp="8ft","12ft","16ft"
@@ -859,38 +899,36 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
 
         else:
            print("Unknown part type for cursor logic:", part)
-    
+    # List for imported links into master
+    part_links = []
     for key,value in parts_to_import.items():
         
         #
         # RAMP POST alg
+        # Create a SET of 
         #
-        
-        
-        
-        
         
         if  "8ft" in value:
             if "A_8ft_A" == value:
-                import_ramp_part(main_file,key,"8ft",angle,angle)
+                new_link = import_ramp_part(main_file,key,"8ft",angle,angle)
             elif "A_8ft" == value:
-                import_ramp_part(main_file,key,"8ft",angle,0)
+                new_link = import_ramp_part(main_file,key,"8ft",angle,0)
             elif "8ft_A" == value:
-                import_ramp_part(main_file,key,"8ft",0,angle)
+                new_link = import_ramp_part(main_file,key,"8ft",0,angle)
             elif "8ft" == value:
-                import_ramp_part(main_file,key,"8ft",0,0)
-            elif "end" in value:
+                new_link = import_ramp_part(main_file,key,"8ft",0,0)
+            elif "END" in value:
                 #A_"+part+"END
                 #"+part+"END
                 if ending_flat:
-                    if "A_8f_END":
-                        print("someing")
-                    elif "8ft_END":
-                        print("see")
+                    if "A_8ft_END" == value:
+                        print("you NEED TO ADD THIS")
+                    elif "8ft_END" == value:
+                        print("you NEED TO ADD THIS")
                     else:
                         print("BAD BAD BAD : "+value)
                 else:
-                    if "A_8f_END":
+                    if "A_8ft_END":
                         print("someing")
                     elif "8ft_END":
                         print("see")
@@ -902,10 +940,201 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
             print("hui")
         elif  "16ft" in value:         
             print("hui")       
+        
+        #
+        # Add link to be connected
+        if new_link:
+           part_links.append(new_link)
+    
+    #assemble main assembly
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     
     
 
+# --- Prep: ensure we have doc, asm, and the master JointGroup -----------------
+
+    doc = FreeCAD.ActiveDocument
+    if doc is None:
+        raise RuntimeError("No active FreeCAD document.")
+
+# If 'asm' already exists from earlier code, keep it; otherwise find the master assembly container.
+    try:
+        asm  # check if variable is already in scope
+    except NameError:
+        asm = next((o for o in doc.Objects if getattr(o, "TypeId", "") == "Assembly::AssemblyObject"), None)
+    if asm is None:
+        raise RuntimeError("Master Assembly container not found in the active document.")
+
+# Helper to find the JointGroup ("Joints" container) under the assembly
+    def find_joint_group(asm_obj):
+        for child in getattr(asm_obj, "Group", []):
+            tid = getattr(child, "TypeId", "")
+            if tid == "Assembly::JointGroup" or child.isDerivedFrom("Assembly::JointGroup"):
+                return child
+        return None
+    # GROUND @####################
+    first_link = part_links[0]
+    if App.GuiUp:
+        Gui.activateWorkbench("AssemblyWorkbench")
+        # Puts the assembly into 'edit' context so it can receive constraints
+        Gui.ActiveDocument.setEdit(asm)
+    
+    # 1. Select the first link
+    Gui.Selection.clearSelection()
+    # Grounding usually targets the object itself, not a specific face
+    Gui.Selection.addSelection(doc.Name, first_link.Name)
+    
+    # 2. Run the Ground command
+    # This command toggles the 'Grounded' status of the selected element
+    is_already_grounded = getattr(first_link, "Grounded", False)
+    if not is_already_grounded:
+        try:
+            Gui.runCommand('Assembly_ToggleGrounded',0)
+            doc.recompute()
+            print(f"Grounded the root element: {first_link.Name}\n")
+        except Exception as e:
+            print(f"Failed to ground {first_link.Name}: {str(e)}\n")
+    else:
+        print(f"{first_link.Label} was already grounded. Skipping toggle.")
+        
+    # Get (or create) the JointGroup
+    joints_grp = find_joint_group(asm)
+    if joints_grp is None:
+        doc.recompute()
+        joints_grp = find_joint_group(asm)
+        if joints_grp is None:
+        # Fallback: create the Joints container if this build didn't auto-create it
+            joints_grp = doc.addObject("Assembly::JointGroup", "Joints")
+            asm.Group = asm.Group + [joints_grp]
+            doc.recompute()
+
+# Activate the Assembly WB so joint commands are available and land in the master
+    if App.GuiUp:
+        Gui.activateWorkbench("AssemblyWorkbench")
+        try:
+            Gui.ActiveDocument.setEdit(asm)  # set master assembly as active edit context
+        except Exception:
+            pass
+    else:
+        raise RuntimeError("Assembly joint creation requires FreeCAD running with GUI up.")
+
+# --- Loop: create Fixed joints between consecutive master links ----------------
+    if App.GuiUp:
+        Gui.activateWorkbench("AssemblyWorkbench")
+        # Ensure the assembly is the active edit context
+        Gui.ActiveDocument.setEdit(asm)
+
+# --- Loop: create Fixed joints between consecutive master links ----------------
+    
+    for i in range(len(part_links) - 1):
+        link_a = part_links[i]
+        link_b = part_links[i + 1]
+
+        if link_a.Name == link_b.Name:
+            continue
+
+    # 1. Clear and Select
+        Gui.Selection.clearSelection()
+        Gui.Selection.addSelection(doc.Name, 'Assembly', f"{link_a.Name}.Face4")
+        Gui.Selection.addSelection(doc.Name, 'Assembly', f"{link_b.Name}.Face1")
+    
+    # Let the GUI thread process the selection
+        QtCore.QCoreApplication.processEvents()
+        time.sleep(0.1)
+    
+        try:
+        # 2. Trigger the command
+            Gui.runCommand('Assembly_CreateJointFixed')
+        
+        # 3. Wait for the Task Panel to be registered
+        # We use a short loop to ensure the GUI is ready
+            while Gui.Control.activeDialog():
+            # Crucial: This allows the GUI to remain responsive to your clicks
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.05)
+        # 4. Use the most stable way to "click" OK in FreeCAD 1.0
+
+        except Exception as e:
+            print(f"Error at Joint {i}: {str(e)}")
+            if Gui.Control.activeDialog():
+                Gui.Control.closeDialog() # 'False' acts as Cancel/Reject
+        
+    # 5. Cool-down for the solver to prevent Access Violation
+        doc.recompute()
+        for _ in range(10):
+            QtCore.QCoreApplication.processEvents()
+            time.sleep(0.02)
+    """
+    for i in range(len(part_links) - 1):
+        link_a = part_links[i]      # App::Link under the master assembly
+        link_b = part_links[i + 1]  # App::Link under the master assembly
+
+        # Select the two sub-elements (must exist on the linked segment, via the App::Link)
+        Gui.Selection.clearSelection()
+        # TIP: Replace "Face4" with the exact face names discovered via manual selection (see notes)
+        Gui.Selection.addSelection(doc.Name, 'Assembly', f"{link_a.Name}.Face1")
+        Gui.Selection.addSelection(doc.Name, 'Assembly', f"{link_b.Name}.Face1")
+        QtCore.QCoreApplication.processEvents()
+        
+        try:
+        # 1. Trigger the command (this opens the Task Panel)
+            Gui.runCommand('Assembly_CreateJointFixed')
+        
+        # 2. IMPORTANT: Give the solver a moment to initialize the task
+            timeout = 10 
+            while not Gui.Control.activeDialog() and timeout > 0:
+                time.sleep(0.05)
+                QtCore.QCoreApplication.processEvents()
+                timeout -= 1
+        
+        # 3. "Click" the OK button in the Task Panel
+            dlg = Gui.Control.activeDialog()
+            if dlg is not None:
+            # In FreeCAD 1.0, we call accept() on the dialog object itself
+                dlg.accept() 
+                print(f"Created joint: {link_a.Label} to {link_b.Label}")
+            else:
+                print(f"Warning: No active dialog found for Joint {i}")
+            
+        except Exception as e:
+            print(f"Error at Joint {i}: {str(e)}")
+            if Gui.Control.activeDialog():
+                Gui.Control.reject() # Close it if it failed
+
+        joint = joints_grp.Group[-1]           # last-added joint in master Joints
+        joint.Label = f"Joint_{i}_to_{i+1}"
+        joint.Type  = "Fixed"                  # enforce type (command already sets it)
+
+    # Optional: small placement nudge (offsets are placements, not references)
+    # joint.Offset2 = FreeCAD.Placement(
+    #     FreeCAD.Vector(0, 0, 0),
+    #     FreeCAD.Rotation(0, 0, 0)
+    # )
+
+    # Optional: inspect references (internal Names)
+    # FreeCAD.Console.PrintMessage(f"  Ref1: {getattr(joint, 'Reference1', None)}\n")
+    # FreeCAD.Console.PrintMessage(f"  Ref2: {getattr(joint, 'Reference2', None)}\n")
+        if App.GuiUp:
+            Gui.ActiveDocument.resetEdit()
+        doc.recompute()
+   """
+
+
+    
 #
 # MAIN
 #

@@ -699,51 +699,6 @@ def advance_cursor(x, y, heading_deg, forward, lateral=0.0):
 
     return x_lat, y_lat
 
-
-def find_joint_group(asm_obj):
-    """Return the Assembly::JointGroup child of the assembly."""
-    for child in getattr(asm_obj, "Group", []):
-        tid = getattr(child, "TypeId", "")
-        if tid == "Assembly::JointGroup" or child.isDerivedFrom("Assembly::JointGroup"):
-            return child
-    return None
-
-def create_fixed_joint_between_links(doc, asm, joints_grp, link_a, link_b,
-                                     sub_a="Binder_End", sub_b="Binder_Start",
-                                     label=None):
-    """
-    Create a Fixed Joint between two App::Link instances that live under the master assembly.
-    Selection is made on the master links, then the Assembly 'Fixed Joint' command is run.
-    """
-    # Build selection on the master links (not the source file objects)
-    Gui.Selection.clearSelection()
-    Gui.Selection.addSelection(doc.Name, link_a.Name, sub_a)
-    Gui.Selection.addSelection(doc.Name, link_b.Name, sub_b)
-
-    # Make master assembly the active edit context so the joint lands in its JointGroup
-    try:
-        Gui.ActiveDocument.setEdit(asm)
-    except Exception:
-        pass
-
-    before = len(joints_grp.Group)
-    Gui.runCommand('Assembly_CreateJointFixed')  # Assembly → Fixed Joint
-    doc.recompute()
-    after = len(joints_grp.Group)
-
-    if after <= before:
-        FreeCAD.Console.PrintError(
-            f"Joint creation failed for {link_a.Name} → {link_b.Name} (sub: {sub_a}, {sub_b})\n"
-        )
-        return None
-
-    new_joint = joints_grp.Group[-1]
-    new_joint.Type = "Fixed"  # command sets it; enforce for clarity
-    if label:
-        new_joint.Label = label
-    doc.recompute()
-    return new_joint
-
     
 def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     parts_to_import= {}
@@ -950,14 +905,7 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     
     
     
-    
-    
-    
-    
-    
-    
-    
-    
+   
     
     
     
@@ -1043,14 +991,23 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     for i in range(len(part_links) - 1):
         link_a = part_links[i]
         link_b = part_links[i + 1]
+        
+        sub_asm_obj_a = link_a.LinkedObject.Group[3].Name
+        sub_asm_obj_b = link_b.LinkedObject.Group[4].Name 
+        
+        path_a = f"{link_a.Name}.{sub_asm_obj_a}.Face4"
+        path_b = f"{link_b.Name}.{sub_asm_obj_b}.Face4"
+        
+    
+        print(sub_asm_obj_a+" "+ sub_asm_obj_b)
 
         if link_a.Name == link_b.Name:
             continue
 
     # 1. Clear and Select
         Gui.Selection.clearSelection()
-        Gui.Selection.addSelection(doc.Name, 'Assembly', f"{link_a.Name}.Face4")
-        Gui.Selection.addSelection(doc.Name, 'Assembly', f"{link_b.Name}.Face1")
+        Gui.Selection.addSelection(doc.Name, 'Assembly', path_a)
+        Gui.Selection.addSelection(doc.Name, 'Assembly', path_b)
     
     # Let the GUI thread process the selection
         QtCore.QCoreApplication.processEvents()
@@ -1078,60 +1035,7 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
         for _ in range(10):
             QtCore.QCoreApplication.processEvents()
             time.sleep(0.02)
-    """
-    for i in range(len(part_links) - 1):
-        link_a = part_links[i]      # App::Link under the master assembly
-        link_b = part_links[i + 1]  # App::Link under the master assembly
 
-        # Select the two sub-elements (must exist on the linked segment, via the App::Link)
-        Gui.Selection.clearSelection()
-        # TIP: Replace "Face4" with the exact face names discovered via manual selection (see notes)
-        Gui.Selection.addSelection(doc.Name, 'Assembly', f"{link_a.Name}.Face1")
-        Gui.Selection.addSelection(doc.Name, 'Assembly', f"{link_b.Name}.Face1")
-        QtCore.QCoreApplication.processEvents()
-        
-        try:
-        # 1. Trigger the command (this opens the Task Panel)
-            Gui.runCommand('Assembly_CreateJointFixed')
-        
-        # 2. IMPORTANT: Give the solver a moment to initialize the task
-            timeout = 10 
-            while not Gui.Control.activeDialog() and timeout > 0:
-                time.sleep(0.05)
-                QtCore.QCoreApplication.processEvents()
-                timeout -= 1
-        
-        # 3. "Click" the OK button in the Task Panel
-            dlg = Gui.Control.activeDialog()
-            if dlg is not None:
-            # In FreeCAD 1.0, we call accept() on the dialog object itself
-                dlg.accept() 
-                print(f"Created joint: {link_a.Label} to {link_b.Label}")
-            else:
-                print(f"Warning: No active dialog found for Joint {i}")
-            
-        except Exception as e:
-            print(f"Error at Joint {i}: {str(e)}")
-            if Gui.Control.activeDialog():
-                Gui.Control.reject() # Close it if it failed
-
-        joint = joints_grp.Group[-1]           # last-added joint in master Joints
-        joint.Label = f"Joint_{i}_to_{i+1}"
-        joint.Type  = "Fixed"                  # enforce type (command already sets it)
-
-    # Optional: small placement nudge (offsets are placements, not references)
-    # joint.Offset2 = FreeCAD.Placement(
-    #     FreeCAD.Vector(0, 0, 0),
-    #     FreeCAD.Rotation(0, 0, 0)
-    # )
-
-    # Optional: inspect references (internal Names)
-    # FreeCAD.Console.PrintMessage(f"  Ref1: {getattr(joint, 'Reference1', None)}\n")
-    # FreeCAD.Console.PrintMessage(f"  Ref2: {getattr(joint, 'Reference2', None)}\n")
-        if App.GuiUp:
-            Gui.ActiveDocument.resetEdit()
-        doc.recompute()
-   """
 
 
     

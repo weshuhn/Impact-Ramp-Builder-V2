@@ -32,7 +32,7 @@ class Box:
         
         # Parse the 05_XX_05 naming convention
         parts = name.split("_")
-        parts += [None] * (3 - len(parts))
+        parts += [""] * (3 - len(parts))
         self.start, self.type, self.end = parts[:3]
 
         # KEEP CUSTOM LENGTH/WIDTH LOGIC
@@ -56,50 +56,100 @@ class Box:
         }
 
         # Run calculations
-        self.calculate_all_posts()
+        self.get_points()
+    def __str__(self):
+        c = self.cords
+        return (f"""
+[{c['Back_Left']['x']}, {c['Back_Left']['y']}] ----------- [{c['Back_Right']['x']}, {c['Back_Right']['y']}]
+      |                         |
+      |                         |
+      |                         |
+[{c['Top_Left']['x']}, {c['Top_Left']['y']}] ----------- [{c['Top_Right']['x']}, {c['Top_Right']['y']}]
+""")
+    
+    def get_points(self):
 
-    def rotate_point(self, local_x, local_y):
-        """Converts local box coordinates to global grid coordinates based on heading"""
-        rad = math.radians(self.heading)
-        # Rotation Matrix
-        rot_x = local_x * math.cos(rad) - local_y * math.sin(rad)
-        rot_y = local_x * math.sin(rad) + local_y * math.cos(rad)
+        # South
+        # box length
         
-        return (self.current_x + rot_x, self.current_y + rot_y)
-
-    def calculate_all_posts(self):
-        # 1. Determine local offsets (distance from the "Center Line" of the ramp)
-        # We assume current_x/y is the center of the start edge
-        half_w = self.width / 2
+        X_mod =1
+        Y_mod =1
+        start_offset_y =0
+        start_offset_x =0
+        end_offset_y=0
+        end_offset_x=0
+        print(self.start, self.end)
+        if (self.heading == 0):
+            
+            # negitive Y
+            Y_mod = -1
+            if ("A_" in self.start):
+                start_offset_y = -1.75
+            if ("_A" in self.end):
+                end_offset_y = 1.75
+                
+        elif (self.heading == 180):
+            # postive Y
+            Y_mod = 1
+            if ("A_" in self.start):
+                start_offset_y = 1.75
+            if ("_A" in self.end):
+                end_offset_y = -1.75
+                
+        elif (self.heading == 90):
+            # negtive X
+            X_mod=-1
+            if ("A_" in self.start):
+                start_offset_x = -1.75
+            if ("_A" in self.end):
+                end_offset_x = 1.75
+        elif (self.heading == 270):
+            # postive X
+            X_mod =1
+            if ("A_" in self.start):
+                start_offset_x = 1.75
+            if ("_A" in self.end):
+                end_offset_x = -1.75
         
-        # Start (Back) Offset Logic
-        start_y_off = 1.75 if self.start == "05" else 0
-        # End (Top) Offset Logic
-        end_y_off = 1.75 if self.end == "05" else 0
-
-        # BACK LEFT (Local)
-        bl_x, bl_y = self.rotate_point(-(half_w - 1.75), start_y_off)
-        self.cords["Back_Left"] = {"x": bl_x, "y": bl_y}
-
-        # BACK RIGHT (Local)
-        br_x, br_y = self.rotate_point((half_w - 1.75), start_y_off)
-        self.cords["Back_Right"] = {"x": br_x, "y": br_y}
-
-        # TOP LEFT (Local)
-        tl_x, tl_y = self.rotate_point(-(half_w - 1.75), self.length - end_y_off)
-        self.cords["Top_Left"] = {"x": tl_x, "y": tl_y}
-
-        # TOP RIGHT (Local)
-        tr_x, tr_y = self.rotate_point((half_w - 1.75), self.length - end_y_off)
-        self.cords["Top_Right"] = {"x": tr_x, "y": tr_y}
-
-        # MIDDLE POSTS (For 12ft and 16ft)
-        if self.length > 96:
-            ml_x, ml_y = self.rotate_point(-(half_w - 1.75), self.length / 2)
-            mr_x, mr_y = self.rotate_point((half_w - 1.75), self.length / 2)
-            self.cords["Mid_Left"] = {"x": ml_x, "y": ml_y}
-            self.cords["Mid_Right"] = {"x": mr_x, "y": mr_y} 
-
+        else:
+            print("we got a directial problem YAY")
+        
+        if (self.heading == 0 or self.heading == 180):
+            
+            # top of box along X
+            # given on corner
+            X_offset=1.75
+            
+            self.cords['Back_Left']['x'] = self.current_x - X_offset - (self.width/2)
+            self.cords['Back_Left']['y'] = self.current_y + start_offset_y
+            
+            self.cords['Back_Right']['x'] = self.current_x + X_offset + (self.width/2)
+            self.cords['Back_Right']['y'] = self.current_y + start_offset_y
+            
+            self.cords['Top_Left']['x'] = self.current_x - X_offset - (self.width/2)
+            self.cords['Top_Left']['y'] = self.current_y + end_offset_y + (self.length*Y_mod)
+            
+            self.cords['Top_Right']['x'] = self.current_x + X_offset + (self.width/2)
+            self.cords['Top_Right']['y'] = self.current_y + end_offset_y + (self.length*Y_mod)
+            
+        elif (self.heading == 90 or self.heading == 270):
+            # NOT CORRECNT
+            # top of box along Y
+            Y_offset=1.75
+            
+            self.cords['Back_Left']['x'] = self.current_x - X_offset - (self.width/2)
+            self.cords['Back_Left']['y'] = self.current_y + start_offset_y
+            
+            self.cords['Back_Right']['x'] = self.current_x + X_offset + (self.width/2)
+            self.cords['Back_Right']['y'] = self.current_y + start_offset_y
+            
+            self.cords['Top_Left']['x'] = self.current_x - X_offset - (self.width/2)
+            self.cords['Top_Left']['y'] = self.current_y + end_offset_y
+            
+            self.cords['Top_Right']['x'] = self.current_x - X_offset - (self.width/2)
+            self.cords['Top_Right']['y'] = self.current_y + end_offset_y
+            
+    
 class MainForm(QtGui.QWidget):
     def __init__(self):
         super(MainForm, self).__init__()
@@ -642,7 +692,7 @@ def import_ramp_part(main_file_path, index, part, start_angle, end_angle):
     sub_doc = App.openDocument(temp_file)
     
     # 3. Update Spreadsheet values
-    sheet = sub_doc.getObject("Spreadsheet001")
+    sheet = sub_doc.getObject("Spreadsheet")
     if sheet:
         sheet.set("start_angle", str(start_angle))
         sheet.set("end_angle", str(end_angle))
@@ -683,8 +733,107 @@ def import_ramp_part(main_file_path, index, part, start_angle, end_angle):
     main_doc.recompute()
     main_doc.save()
     return nested_link
-        
 
+def append_row(sheet_obj, name):
+    """
+    Finds the first empty row in column A and writes the data_list across that row.
+    """
+    row = 1
+    # Find the first row where Column A is empty
+    while sheet_obj.getContents(f"A{row}"):
+        row += 1
+    sheet_obj.set(f"A{row}", name)
+    sheet_obj.set(f"B{row}", "1")
+    sheet_obj.setAlias(f"B{row}", f"Post_{name}")
+    
+    App.activeDocument().recompute()     
+
+def make_post_sketch(main_file,name,angle=0):
+    
+    doc = App.activeDocument()
+    
+    assembly = None
+    for obj in doc.Objects:
+        if "Assembly" in obj.Label or obj.isDerivedFrom("App::Part"):
+            assembly = obj
+            break
+    
+    if not assembly:
+        print("Assembly object not found.")
+        return
+    
+    body = doc.addObject('PartDesign::Body', 'Post_Body')
+    assembly.addObject(body)
+    
+    sketch = doc.addObject('Sketcher::SketchObject', 'PostSketch')
+    body.addObject(sketch) # This makes it a child of the assembly
+    
+    dim = 3.5 * 25.4 
+    
+    # Create line segments
+    lines = [
+        Part.LineSegment(App.Vector(0, 0, 0), App.Vector(dim, 0, 0)),
+        Part.LineSegment(App.Vector(dim, 0, 0), App.Vector(dim, dim, 0)),
+        Part.LineSegment(App.Vector(dim, dim, 0), App.Vector(0, dim, 0)),
+        Part.LineSegment(App.Vector(0, dim, 0), App.Vector(0, 0, 0))
+    ]
+    
+    for line in lines:
+        sketch.addGeometry(line, False)
+
+    # 4. Add Constraints
+    # Connect corners (Coincident)
+    sketch.addConstraint(Sketcher.Constraint('Coincident', 0, 2, 1, 1))
+    sketch.addConstraint(Sketcher.Constraint('Coincident', 1, 2, 2, 1))
+    sketch.addConstraint(Sketcher.Constraint('Coincident', 2, 2, 3, 1))
+    sketch.addConstraint(Sketcher.Constraint('Coincident', 3, 2, 0, 1))
+    
+    # Ensure lines are square
+    sketch.addConstraint(Sketcher.Constraint('Horizontal', 0))
+    sketch.addConstraint(Sketcher.Constraint('Vertical', 1))
+    
+    # Set Dimensions to 3.5 inches
+    sketch.addConstraint(Sketcher.Constraint('DistanceX', 0, 1, 0, 2, dim))
+    sketch.addConstraint(Sketcher.Constraint('DistanceY', 1, 1, 1, 2, dim))
+    
+    doc.recompute()
+    
+    pad = doc.addObject('PartDesign::Pad', f'{name}')
+    pad.Profile = sketch
+    body.addObject(pad)
+    
+    pad.Type = 4 
+    
+    # Direction 1: 5 inches up
+    pad.Length = 29.0 * 25.4
+    
+    # Direction 2: 2 inches down
+    pad.setExpression('Length2', f'Posts_Ramp.Post_{name}')
+    
+    doc.recompute()
+    flat="LAN","TR","TL","UTURNR","UTURNL"
+    if angle != 0 and name not in flat:
+        draft = doc.addObject('PartDesign::Draft', f'Draft_{name}')
+        body.addObject(draft)
+        
+        # Define which face to draft. 
+        # Typically, for a Pad, Face6 is one of the vertical side faces.
+        draft.Base = (pad, ["Face6"])
+        
+        # PullDirection is the vector along which the draft is measured (usually Z)
+        #draft.PullDirection = (pad, ["Edge10"]) # Using a face to define the normal
+        
+        #draft.NeutralPlane = (pad, ["Face5"])
+        
+        draft.Angle = angle
+        draft.Reversed = True # Matches your recorded macro
+        
+        doc.recompute()
+
+#
+##
+#
+#   I PROB DONT NEED TGHIS
 def advance_cursor(x, y, heading_deg, forward, lateral=0.0):
     rad = math.radians(heading_deg)
 
@@ -699,7 +848,7 @@ def advance_cursor(x, y, heading_deg, forward, lateral=0.0):
 
     return x_lat, y_lat
 
-    
+# Bigen
 def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     parts_to_import= {}
     parced_desc=desc.split(",")
@@ -824,13 +973,22 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
             print("NO NO NO NO - A part was NOT imported HELP HELP HELP"+part)
         # curs
         # should always be the top center line
+        
+        # patch for now
+        current_y -= boxes[f"{index}_{part}"].length
+        #current_x = boxes[f"{index}_{part}"].width
+        
+        
+        # Do this in the class
+        """
         length = boxes[f"{index}_{part}"].length
         width = boxes[f"{index}_{part}"].width
 
         # Compute movement and heading updates per part type
         if part in ("8ft", "12ft", "16ft", "LAN"):
         # Straight run or inline landing: advance full length
-            current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length, lateral=0.0)
+            #current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length, lateral=0.0)
+            None
 
         elif part == "TL":
             # 90° left turn landing: half forward, then left by width/2, then rotate left
@@ -854,6 +1012,8 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
 
         else:
            print("Unknown part type for cursor logic:", part)
+           
+        """
     # List for imported links into master
     part_links = []
     for key,value in parts_to_import.items():
@@ -901,16 +1061,54 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
         if new_link:
            part_links.append(new_link)
     
+    
+    #So like testing the post thing now
+    temp_post_big = {}
+    for name,box in boxes.items():
+        for key,value in box.cords.items():
+            if value != None:
+                temp_post_big[f"{name}_{key}"]=value
+    post_final={}
+    seen_points = set()
+    for key,val in temp_post_big.items():
+        point_tuple = (val['x'], val['y'])
+        if point_tuple not in seen_points:
+            post_final[key] = val
+            seen_points.add(point_tuple)
+        
+
+    for k,v in post_final.items():
+        print(f"{k}: {v}")
+        
+    
+    # get posts to set to box 
+    
+    # create post stuff??
+    # create spreadsheet
+    
+    doc = App.activeDocument()
+    print(77)
+    assembly = None
+    for obj in doc.Objects:
+        if "Assembly" in obj.Label or obj.isDerivedFrom("App::Part"):
+            assembly = obj
+            break
+    
+    if not assembly:
+        print("Assembly object not found.")
+        return
+    
+    sheet = doc.addObject("Spreadsheet::Sheet", "Posts_Ramp")
+    assembly.addObject(sheet)
+    for name,points in post_final.items():
+        append_row(sheet,name)
+        make_post_sketch(main_file,name,angle)
+            
+        
+    # schetch? -> spreadsheet -> pan (extend) 2 ways one as var -> draft on face based on angle
+    
+    
     #assemble main assembly
-    
-    
-    
-   
-    
-    
-    
-    
-    
     
 
 # --- Prep: ensure we have doc, asm, and the master JointGroup -----------------
@@ -992,8 +1190,8 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
         link_a = part_links[i]
         link_b = part_links[i + 1]
         
-        sub_asm_obj_a = link_a.LinkedObject.Group[3].Name
-        sub_asm_obj_b = link_b.LinkedObject.Group[4].Name 
+        sub_asm_obj_a = link_a.LinkedObject.Group[4].Name
+        sub_asm_obj_b = link_b.LinkedObject.Group[3].Name 
         
         path_a = f"{link_a.Name}.{sub_asm_obj_a}.Face4"
         path_b = f"{link_b.Name}.{sub_asm_obj_b}.Face4"
@@ -1035,9 +1233,9 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
         for _ in range(10):
             QtCore.QCoreApplication.processEvents()
             time.sleep(0.02)
+    
 
-
-
+    
     
 #
 # MAIN

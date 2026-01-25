@@ -2,7 +2,10 @@
 import FreeCAD
 import FreeCADGui
 import Assembly
+import JointObject
 import Part
+import UtilsAssembly
+import Assembly
 import time
 import json
 import sys
@@ -11,6 +14,22 @@ import shutil
 import os
 import math
 from PySide import QtCore, QtGui
+
+
+import Preferences
+prefs = Preferences.preferences()
+prefs.SetBool("SolveInJointCreation", False) 
+prev_solve = prefs.GetBool("SolveInJointCreation", True)
+
+import UtilsAssembly
+from JointObject import Joint, ViewProviderJoint
+
+def find_joint_group(asm_obj):
+    for child in getattr(asm_obj, "Group", []):
+        tid = getattr(child, "TypeId", "")
+        if tid == "Assembly::JointGroup" or child.isDerivedFrom("Assembly::JointGroup"):
+            return child
+    return None
 
 class Box:
     def __init__(self, current_x, current_y, index, name,heading, length=0, width=0):
@@ -335,6 +354,13 @@ class MainForm(QtGui.QWidget):
             )
             return
 
+        # CREATING THE MASTER FILE
+
+        doc = App.newDocument(f"{Client_Name}_{Site_Number}")
+
+        main_file = f"C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/{Client_Name}_{Site_Number}.FCStd"
+        doc.saveAs(main_file)
+        
         
         if ramp: 
         	Drop_Slope = int(Drop_Slope) if Drop_Slope else None
@@ -345,7 +371,7 @@ class MainForm(QtGui.QWidget):
             Stair_Number = int(Stair_Number)
             # --- PATH FIX: Pass the macro_dir to the new window ---
             self.deck_designer_window = DeckDesignerWindow(
-                Deck_Length, Deck_Width, Stair_Number, Inches_Deck,ramp, 
+                main_file,Deck_Length, Deck_Width, Stair_Number, Inches_Deck,ramp, 
                 self.macro_dir, # Pass the path
                 parent=self
             )
@@ -356,15 +382,17 @@ class MainForm(QtGui.QWidget):
         if ramp and not deck:
             # call to main ramp
             Gui.Control.closeDialog()
-            ramp_main(Ramp_Desc,Flat_Check,Drop_Slope,Drop_Angle,Client_Name,Site_Number)
+            ramp_main(main_file,Ramp_Desc,Flat_Check,Drop_Slope,Drop_Angle,Client_Name,Site_Number)
             
 
 # deck break out
 class DeckDesignerWindow(QtGui.QMainWindow):
-    def __init__(self, deck_length, deck_width, stair_count, inch, ramp, macro_dir, parent=None): # <-- FIX: Added macro_dir
+    def __init__(self, main_file, deck_length, deck_width, stair_count, inch, ramp, macro_dir, parent=None): # <-- FIX: Added macro_dir
         super(DeckDesignerWindow, self).__init__(parent)
         self.setWindowTitle(f"Deck Designer - {deck_length} x {deck_width}")
         self.setGeometry(200, 200, 1000, 800)
+        
+        self.main_file=main_file
 
         self.inch_unit=inch
         self.deck_length = deck_length
@@ -373,7 +401,10 @@ class DeckDesignerWindow(QtGui.QMainWindow):
         self.macro_dir = macro_dir # <-- FIX: Save the path
         self.ramp = ramp
         
+        self.ramp_item = None
         self.stair_items = []
+        self.house_label_item = None  
+        self.deck_rect = None       
 
         self.central_widget = QtGui.QWidget()
         self.setCentralWidget(self.central_widget)
@@ -382,147 +413,122 @@ class DeckDesignerWindow(QtGui.QMainWindow):
         self.create_design_space()
         
     def create_design_space(self):
-        # (This function is unchanged, it just builds the UI)
         title_label = QtGui.QLabel("<h2>Deck and Ramp Placement (Top View)</h2>")
         self.master_layout.addWidget(title_label)
+        
+        # Control Group
         control_group = QtGui.QGroupBox("Design Controls")
         control_layout = QtGui.QHBoxLayout(control_group)
-        house_label = QtGui.QLabel("House Facing Side:")
+        
+        control_layout.addWidget(QtGui.QLabel("House Facing Side:"))
         self.house_side_combo = QtGui.QComboBox()
         self.house_side_combo.addItems(["Top", "Bottom", "Left", "Right"])
         self.house_side_combo.currentTextChanged.connect(self.update_house_label)
-        control_layout.addWidget(house_label)
         control_layout.addWidget(self.house_side_combo)
+        
         control_layout.addStretch(1)
-        self.build_button = QtGui.QPushButton("Build 3D Model in FreeCAD")
-        self.build_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 5px; font-weight: bold;")
+        
+        self.build_button = QtGui.QPushButton("Build 3D Model")
+        self.build_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px; font-weight: bold;")
         self.build_button.clicked.connect(self.build_in_freecad)
         control_layout.addWidget(self.build_button)
+        
         self.master_layout.addWidget(control_group)
+
+        # Scene and View
         self.scene = QtGui.QGraphicsScene()
         self.view = QtGui.QGraphicsView(self.scene)
         self.view.setRenderHint(QtGui.QPainter.Antialiasing)
+        # Background color for a cleaner "Drafting" look
+        self.view.setBackgroundBrush(QtGui.QBrush(QtGui.QColor(240, 240, 240))) 
         self.master_layout.addWidget(self.view)
+
         self.draw_deck()
         self.add_components()
-        self.house_label_item = None
         self.update_house_label(self.house_side_combo.currentText())
-
-    def build_in_freecad(self):
-        # (This function is unchanged, it just builds the 3D parts)
-        print("Building 3D model in FreeCAD...")
-        house_side = self.house_side_combo.currentText()
-        print(f"House on {house_side} side.")
-        if self.inch_unit:
-            deck_l_mm = self.deck_length * 25.4
-            deck_w_mm = self.deck_width * 25.4
-        else:
-            deck_l_mm = self.deck_length * 304.8
-            deck_w_mm = self.deck_width * 304.8
-        deck_h_mm = 152.4 
-        print(f"Deck (mm): L={deck_l_mm}, W={deck_w_mm}, H={deck_h_mm}")
-        try:
-            doc = FreeCAD.newDocument("Deck_Project")
-        except Exception:
-            doc = FreeCAD.ActiveDocument
-            if not doc:
-                QtGui.QMessageBox.critical(self, "FreeCAD Error", "Could not create or find a FreeCAD document.")
-                return
-        deck_shape = Part.makeBox(deck_l_mm, deck_w_mm, deck_h_mm)
-        deck_obj = doc.addObject("Part::Feature", "Deck")
-        deck_obj.Shape = deck_shape
-        for i, stair_item in enumerate(self.stair_items):
-            pos = stair_item.pos()
-            rect = stair_item.boundingRect()
-            print(f"Stair {i+1} at scene pos: ({pos.x()}, {pos.y()})")
-            stair_w_mm = rect.width() * 25.4 
-            stair_l_mm = rect.height() * 25.4
-            stair_h_mm = 152.4
-            stair_shape = Part.makeBox(stair_l_mm, stair_w_mm, stair_h_mm)
-            stair_obj = doc.addObject("Part::Feature", f"Stairs_{i+1}")
-            stair_obj.Shape = stair_shape
-            stair_obj.Placement = FreeCAD.Placement(
-                FreeCAD.Vector(deck_l_mm + 500, i * (stair_w_mm + 200), 0), 
-                FreeCAD.Rotation(0,0,0)
-            )
-        ramp_pos = self.ramp_item.pos()
-        ramp_rect = self.ramp_item.boundingRect()
-        print(f"Ramp at scene pos: ({ramp_pos.x()}, {ramp_pos.y()})")
-        ramp_w_mm = ramp_rect.width() * 25.4
-        ramp_l_mm = ramp_rect.height() * 25.4
-        ramp_h_mm = 152.4
-        ramp_shape = Part.makeBox(ramp_l_mm, ramp_w_mm, ramp_h_mm)
-        ramp_obj = doc.addObject("Part::Feature", "Ramp")
-        ramp_obj.Shape = ramp_shape
-        ramp_obj.Placement = FreeCAD.Placement(
-            FreeCAD.Vector(deck_l_mm + 500, -ramp_w_mm - 200, 0), 
-            FreeCAD.Rotation(0,0,0)
-        )
-        doc.recompute()
-        FreeCADGui.SendMsgToActiveView("ViewFit")
-        print("Build complete. Closing windows.")
-        self.close()
-        FreeCADGui.Control.closeDialog()
+        
+        
+        
+    def resizeEvent(self, event):
+        """ This ensures the deck scales when the window is resized. """
+        super(DeckDesignerWindow, self).resizeEvent(event)
+        if hasattr(self, 'scene'):
+            # Fit the deck in view while maintaining aspect ratio
+            self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
 
     def update_house_label(self, side: str):
-        # (This function is unchanged, it just draws the "HOUSE" text)
-        if self.house_label_item:
+        # 1. Safe check for the item
+        if hasattr(self, 'house_label_item') and self.house_label_item:
             self.scene.removeItem(self.house_label_item)
             self.house_label_item = None
+            
         if not hasattr(self, 'deck_rect') or not self.deck_rect:
             return
+
         deck_rect = self.deck_rect.rect()
-        label_text = "HOUSE"
-        label = QtGui.QGraphicsTextItem(label_text)
+        
+        # 2. Dynamic Font Scaling (approx 6% of the smallest deck dimension)
+        reference_dim = min(deck_rect.width(), deck_rect.height())
+        font_size = max(12, int(reference_dim * 0.06)) 
+        
+        label = QtGui.QGraphicsTextItem("HOUSE")
         label.setDefaultTextColor(QtGui.QColor(255, 0, 0))
-        font = label.font()
-        font.setPointSize(20)
-        font.setBold(True)
+        font = QtGui.QFont("Arial", font_size, QtGui.QFont.Bold)
         label.setFont(font)
+        
+        # 3. FIX: Set rotation point to center of the text
         label_bounds = label.boundingRect()
+        label.setTransformOriginPoint(label_bounds.center())
+        
+        # Margin based on font size to keep it clean
+        margin = font_size * 0.5 
+
+        # 4. Position Logic
         if side == "Top":
             x = deck_rect.left() + (deck_rect.width() - label_bounds.width()) / 2
-            y = deck_rect.top() - label_bounds.height()
+            y = deck_rect.top() - label_bounds.height() - margin
         elif side == "Bottom":
             x = deck_rect.left() + (deck_rect.width() - label_bounds.width()) / 2
-            y = deck_rect.bottom()
+            y = deck_rect.bottom() + margin
         elif side == "Left":
-            x = deck_rect.left() - label_bounds.width()
-            y = deck_rect.top() + (deck_rect.height() - label_bounds.height()) / 2
             label.setRotation(-90)
-            x += label_bounds.height()
-        elif side == "Right":
-            x = deck_rect.right()
+            # Center vertically, place to the left of the deck edge
+            x = deck_rect.left() - label_bounds.width() - margin
             y = deck_rect.top() + (deck_rect.height() - label_bounds.height()) / 2
+        elif side == "Right":
             label.setRotation(90)
-            y += label_bounds.width()
-        else:
-            return
+            # Center vertically, place to the right of the deck edge
+            x = deck_rect.right() + margin
+            y = deck_rect.top() + (deck_rect.height() - label_bounds.height()) / 2
+
         label.setPos(x, y)
         self.scene.addItem(label)
         self.house_label_item = label
         
+        # 5. Expand scene rect so the label doesn't get cut off during fitInView
+        self.scene.setSceneRect(self.scene.itemsBoundingRect().adjusted(-50, -50, 50, 50))
+        
     def draw_deck(self):
+        """Clears the scene and draws the main deck rectangle with textures and labels."""
         self.scene.clear()
         
-        if self.inch_unit:
-            SCALE = 1
-        else:
-            SCALE = 10 
+        # 1. Determine Scale (Inches vs Feet)
+        # If inch_unit is True, we treat units as 1:1. If False (Feet), we scale by 12.
+        SCALE = 1 if self.inch_unit else 12
         
         visual_length = self.deck_length * SCALE
         visual_width = self.deck_width * SCALE
         
+        # 2. Setup Texture/Brush
         try:
-            # --- PATH FIX: Use absolute path for texture ---
             texture_path = os.path.join(self.macro_dir, "Decking.png")
             texture_pixmap = QtGui.QPixmap(texture_path)
-            # --- END FIX ---
             
             if texture_pixmap.isNull():
-                print(f"Warning: Texture image 'Decking.png' not found at {texture_path}")
-                deck_brush = QtGui.QBrush(QtGui.QColor(190, 190, 250, 100))
+                # Fallback to a professional "blueprint" blue if image is missing
+                deck_brush = QtGui.QBrush(QtGui.QColor(100, 150, 200, 150))
             else:
+                # Tile the texture or scale it to fit the deck area
                 scaled_pixmap = texture_pixmap.scaled(
                     visual_length, visual_width,
                     QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.SmoothTransformation
@@ -531,21 +537,40 @@ class DeckDesignerWindow(QtGui.QMainWindow):
                 
         except Exception as e:
             print(f"Error loading texture: {e}. Falling back to solid color.")
-            deck_brush = QtGui.QBrush(QtGui.QColor(190, 190, 250, 100))
+            deck_brush = QtGui.QBrush(QtGui.QColor(200, 200, 200))
 
+        # 3. Create the Deck Rectangle
         self.deck_rect = QtGui.QGraphicsRectItem(0, 0, visual_length, visual_width)
         self.deck_rect.setBrush(deck_brush)
+        self.deck_rect.setPen(QtGui.QPen(QtCore.Qt.black, 2)) # Stronger border
         self.scene.addItem(self.deck_rect)
         
-        label = QtGui.QGraphicsTextItem(f"Deck Area\n{self.deck_length} x {self.deck_width}")
-        label.setDefaultTextColor(QtGui.QColor(0, 0, 100))
-        label.setPos(visual_length / 2 - label.boundingRect().width() / 2,
-                     visual_width / 2 - label.boundingRect().height() / 2)
+        # 4. Add the Area Label (Centered)
+        label_text = f"DECK AREA\n{self.deck_length}' x {self.deck_width}'"
+        label = QtGui.QGraphicsTextItem(label_text)
+        
+        # Dynamic font size for the center label (approx 5% of deck height)
+        center_font_size = max(10, int(visual_width * 0.05))
+        label.setFont(QtGui.QFont("Arial", center_font_size, QtGui.QFont.Bold))
+        label.setDefaultTextColor(QtGui.QColor(20, 20, 20))
+        
+        # Center the label inside the deck
+        label_rect = label.boundingRect()
+        label.setPos(
+            (visual_length - label_rect.width()) / 2,
+            (visual_width - label_rect.height()) / 2
+        )
         self.scene.addItem(label)
         
-        self.scene.setSceneRect(QtCore.QRectF(self.deck_rect.rect()).normalized().adjusted(-10, -10, 10, 10))
+        # 5. Scene Boundary Logic
+        # We adjust the scene rect by -100 to +100 to give room for the "HOUSE" label 
+        # and stairs to exist outside the deck perimeter.
+        self.scene.setSceneRect(self.deck_rect.rect().adjusted(-100, -100, 100, 100))
+        
+        # Force the view to update and center the new deck
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
-
+    
+    
     def add_components(self):
         deck_item = self.deck_rect
         
@@ -553,9 +578,7 @@ class DeckDesignerWindow(QtGui.QMainWindow):
             print(self.ramp)
             initial_x_offset = 0
             for i in range(self.stair_count):
-                # --- PATH FIX: Pass macro_dir to item ---
                 stairs = StairsItem(self.inch_unit, index=i + 1, deck_item=deck_item, macro_dir=self.macro_dir)
-                # --- END FIX ---
                 stairs.setPos(initial_x_offset, 0)
                 initial_x_offset += stairs.boundingRect().width()
                 self.scene.addItem(stairs)
@@ -566,90 +589,491 @@ class DeckDesignerWindow(QtGui.QMainWindow):
 	        ramp.setPos(ramp_x_pos, 0)
 	        self.scene.addItem(ramp)
 	        self.ramp_item = ramp
+    
+    def make_post(doc,asm,name):
+        body = doc.addObject('PartDesign::Body', 'Post_Body')
+        asm.addObject(body)
+        sketch = doc.addObject('Sketcher::SketchObject', 'PostSketch')
+        body.addObject(sketch) # This makes it a child of the assembly
+        #
+        dim = 3.5 * 25.4 
+        lines = [
+        Part.LineSegment(App.Vector(0, 0, 0), App.Vector(dim, 0, 0)),
+        Part.LineSegment(App.Vector(dim, 0, 0), App.Vector(dim, dim, 0)),
+        Part.LineSegment(App.Vector(dim, dim, 0), App.Vector(0, dim, 0)),
+        Part.LineSegment(App.Vector(0, dim, 0), App.Vector(0, 0, 0))
+        ]
+        for line in lines:
+            sketch.addGeometry(line, False)
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 0, 2, 1, 1))
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 1, 2, 2, 1))
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 2, 2, 3, 1))
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 3, 2, 0, 1))
+        sketch.addConstraint(Sketcher.Constraint('Horizontal', 0))
+        sketch.addConstraint(Sketcher.Constraint('Vertical', 1))
+        
+        sketch.addConstraint(Sketcher.Constraint('DistanceX', 0, 1, 0, 2, dim))
+        sketch.addConstraint(Sketcher.Constraint('DistanceY', 1, 1, 1, 2, dim))
+        doc.recompute()
+        
+        pad = doc.addObject('PartDesign::Pad', f'{name}')
+        pad.Profile = sketch
+        body.addObject(pad)
+        pad.Type = 4 
+        pad.Length = 29.0 * 25.4 ############################################ HAND RAIL height
+        pad.setExpression('Length2', f'Posts_deck.Post_{name}')
+        doc.recompute()
+    # send OBJ
+    def ground_joint(self,asm,doc,part):
+        
+        if App.GuiUp:
+            Gui.activateWorkbench("AssemblyWorkbench")
+        # Puts the assembly into 'edit' context so it can receive constraints
+            Gui.ActiveDocument.setEdit(asm)
+
+        Gui.Selection.clearSelection()
+        Gui.Selection.addSelection(doc.Name, part.Name)
+        
+        
+        is_already_grounded = getattr(part, "Grounded", False)
+        if not is_already_grounded:
+            try:
+                Gui.runCommand('Assembly_ToggleGrounded',0)
+                doc.recompute()
+                print(f"Grounded the root element: {part.Name}\n")
+            except Exception as e:
+                print(f"Failed to ground {part.Name}: {str(e)}\n")
+        else:
+            print(f"{part.Label} was already grounded. Skipping toggle.")
+            
+            # Get (or create) the JointGroup
+        joints_grp = find_joint_group(asm)
+        if joints_grp is None:
+            doc.recompute()
+            joints_grp = find_joint_group(asm)
+            if joints_grp is None:
+        # Fallback: create the Joints container if this build didn't auto-create it
+                joints_grp = doc.addObject("Assembly::JointGroup", "Joints")
+                asm.Group = asm.Group + [joints_grp]
+                doc.recompute()
+
+# Activate the Assembly WB so joint commands are available and land in the master
+        if App.GuiUp:
+            Gui.activateWorkbench("AssemblyWorkbench")
+            try:
+                Gui.ActiveDocument.setEdit(asm)  # set master assembly as active edit context
+            except Exception:
+                pass
+        else:
+            raise RuntimeError("Assembly joint creation requires FreeCAD running with GUI up.")
+
+    # X Y Z
+    def make_joint(self,asm,doc,itemA,itemB,offsetX,offsetY,offsetZ):
+        Gui.Selection.clearSelection()
+        Gui.Selection.addSelection(doc.Name,'Deck',itemA)
+        Gui.Selection.addSelection(doc.Name,'Deck',itemB)
+    
+    
+        QtCore.QCoreApplication.processEvents()
+        time.sleep(0.1)
+    
+        try:
+        # 2. Trigger the command
+            Gui.runCommand('Assembly_CreateJointFixed')
+        
+        # 3. Wait for the Task Panel to be registered
+        # We use a short loop to ensure the GUI is ready
+            while Gui.Control.activeDialog():
+            # Crucial: This allows the GUI to remain responsive to your clicks
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.05)
+                mw = Gui.getMainWindow()
+        # Send 'Enter' key event to the main window/active focus
+                buttons = mw.findChildren(QtGui.QPushButton)
+                for btn in buttons:
+                    if btn.text() == "OK":
+                        btn.click() # This is a direct Qt click signal
+                        found_button = True
+                        break
+
+        except Exception as e:
+            print(f"Error at Joint {i}: {str(e)}")
+            if Gui.Control.activeDialog():
+                Gui.Control.closeDialog() # 'False' acts as Cancel/Reject
+        
+        
+        doc.recompute()
+        for _ in range(10):
+            QtCore.QCoreApplication.processEvents()
+            time.sleep(0.02)
+
+        joint_grp=find_joint_group(asm)
+        new_joint = joint_grp.Group[-1]
+        new_joint.Offset2 = App.Placement(App.Vector(offsetX* 25.4 , offsetY*25.4,offsetZ* 25.4), App.Rotation())
+        Gui.Selection.clearSelection()
+    
+    def build_in_freecad(self):
+        SCALE = 1 if self.inch_unit else 12
+        
+        right26=None
+        left26=None
+        top26=None
+        bottom26=None
+
+        # joists   
+        if (self.deck_width == self.deck_length) or (self.deck_width > self.deck_length):
+            joists_direct="width"
+            num_of_joists=((self.deck_width * SCALE)//24)
+            
+            if (self.deck_width * SCALE) % 24:
+                num_of_joists=((self.deck_width * SCALE) / 24) -1
+            else:
+                num_of_joists=((self.deck_width * SCALE)//24)
+                
+                
+            
+            spacing_joists=((self.deck_width * SCALE)-3) / (num_of_joists + 1) ############### -3 might be wrong \_('>')_/
+        else:
+            joists_direct="length"
+            if (self.deck_width * SCALE) % 24:
+                num_of_joists=((self.deck_width * SCALE) / 24) -1
+            else:
+                num_of_joists=((self.deck_width * SCALE)//24)
+            spacing_joists=((self.deck_length * SCALE)-3) / (num_of_joists + 1) ############### -3 might be wrong \_('>')_/
+        
+        
+        if (joists_direct == "length"):
+            if self.ramp_item:
+                if self.ramp_item.snapped_edge in ["Top","Bottom"]:
+                    joists_length=((self.deck_length * SCALE) -8) * 25.4 ############ might be crazy wrong
+                else:
+                   joists_length=((self.deck_length * SCALE) -3) * 25.4
+            else:
+                joists_length=((self.deck_length * SCALE) -3) * 25.4
+        else:
+            if self.ramp_item:
+               if self.ramp_item.snapped_edge in ["Right","Left"]:
+                    joists_length=((self.deck_width * SCALE) -8) * 25.4 ########
+               else:
+                   joists_length=((self.deck_width * SCALE) -3) * 25.4
+            else:
+                joists_length=((self.deck_width * SCALE) -3) * 25.4
+        print(f"joists_direct {joists_direct}   num_of_runners : {num_of_joists}  spacing_joists {spacing_joists} joists_length {joists_length}" )
+        
+        #
+        # ops length needs to be shorten 1.5inches
+        if self.ramp_item:
+            # ramp self.ramp_item.snapped_edge
+            if self.ramp_item.snapped_edge == "Right":
+                right26 = ((self.deck_width * SCALE) -3)# width - 3 inches offset to mm
+                left26 = (self.deck_width * SCALE)
+                top26 = ((self.deck_length * SCALE) -3)
+                bottom26 = ((self.deck_length * SCALE) -3)
+            
+            elif self.ramp_item.snapped_edge == "Left":
+                left26 = ((self.deck_width * SCALE) -3) # width - 3 inches offset to mm
+                right26 = (self.deck_width * SCALE)
+                top26 = ((self.deck_length * SCALE) -3)
+                bottom26 =((self.deck_length * SCALE) -3)
+                
+            elif self.ramp_item.snapped_edge == "top":
+                top26 = ((self.deck_length * SCALE) -3)# width - 3 inches offset to mm
+                
+                
+                
+            elif self.ramp_item.snapped_edge == "bottom":
+                top26 = ((self.deck_length * SCALE) -3)# width - 3 inches offset to mm    
+        
+
+            
+        
+        print(f"""
+        
+        ________{top26}_______
+        |                    |
+        |                    |
+        {left26}             {right26}
+        |                    |
+        |                    |
+        --------{bottom26}----
+        
+        """)    
+        
+        
+        
+        doc = App.openDocument(self.main_file)
+        try:
+            import Assembly
+        # Some versions require the Workbench to be initialized to register types
+            if App.GuiUp:
+                Gui.activateWorkbench("AssemblyWorkbench")
+                
+        except ImportError:
+            App.Console.PrintError("Assembly Workbench not found. Please ensure FreeCAD 1.0+ is installed.\n")
+        
+        try:
+            asm = doc.addObject("Assembly::AssemblyObject", "Deck")
+            doc.recompute()
+    
+        except Exception as e:
+            App.Console.PrintError(f"Error creating assembly object: {str(e)}\n")
+        
+        # POST SHEET
+        sheet = doc.addObject("Spreadsheet::Sheet", "Posts_deck")
+        asm.addObject(sheet) 
+        append_row(sheet,name)
+        
+        # main posts
+        TLP=make_post(doc,asm,"TLP")
+        TRP=make_post(doc,asm,"TRP")
+        BLP=make_post(doc,asm,"BLP")
+        BRP=make_post(doc,asm,"BRP")
+        
+        
+        #main boards
+        right26_obj = doc.addObject("Part::Box", "right26")
+        right26_obj.Length = (right26 * 25.4)
+        right26_obj.Width = (1.5*25.4)
+        right26_obj.Height = (5.5*25.4)
+        asm.addObject(right26_obj) 
+        left26_obj = doc.addObject("Part::Box", "left26")
+        left26_obj.Length = (left26 * 25.4)
+        left26_obj.Width = (1.5*25.4)
+        left26_obj.Height = (5.5*25.4)
+        asm.addObject(left26_obj) 
+        top26_obj = doc.addObject("Part::Box", "top26")
+        top26_obj.Length = (top26 * 25.4)
+        top26_obj.Width = (1.5*25.4)
+        top26_obj.Height = (5.5*25.4)
+        asm.addObject(top26_obj) 
+        bottom26_obj = doc.addObject("Part::Box", "bottom26")
+        bottom26_obj.Length = (bottom26 * 25.4)
+        bottom26_obj.Width = (1.5*25.4)
+        bottom26_obj.Height = (5.5*25.4)
+        asm.addObject(bottom26_obj) 
+        
+        doc.recompute()
+        Gui.Control.closeDialog()
+       
+        #self.ground_joint(asm,doc,top26_obj)
+        #self.make_joint(doc,'left26.Face2','top26.Face4',(top26/2)-.75)
+        base=""
+        if self.ramp_item:
+            if self.ramp_item.snapped_edge == "Right":
+                self.ground_joint(asm,doc,left26_obj)
+                self.make_joint(asm,doc,'top26.Face2','left26.Face4',0,(left26/2)-.75,0)
+                self.make_joint(asm,doc,'bottom26.Face2','left26.Face4',0,-(left26/2)+.75,0)
+                print(top26)
+                self.make_joint(asm,doc,'right26.Face3','left26.Face4',0,0,top26-5)
+                
+                if joists_direct in "length":
+                    base="top26.Face3"
+                    base1="bottom26.Face4"
+                    
+                    
+                else:
+                    base="right26.Face3"
+                    base1="left26.Face4"
+                
+                print(f"{joists_direct}")
+                for i in range(num_of_joists):
+                    joist = doc.addObject("Part::Box", f"joist_{i}")
+                    joist.Length = (joists_length)
+                    joist.Width = (1.5*25.4)
+                    joist.Height = (5.5*25.4)
+                    asm.addObject(joist) 
+
+                    self.make_joint(asm,doc,f'joist_{i}.Face1',base,0,((spacing_joists*(i+1))-((right26/2)-.75)),0)
+                    for _ in range(10):
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.02)
+                
+                
+                    
+                
+            
+             # el if
+             #
+             #  if el
+             
+             
+             
+             print(f" RAMP LOG: {self.ramp_item.name} | Edge: {self.ramp_item.snapped_edge} | Offset: {self.ramp_item.offset_value} in from {self.ramp_item.snapped_corner}")
+             
+             
+             
+             
+             
+             
+             
+             
+             
+             
+             
+             
+             
+             
+             
+             
+             
+             
+
+            elif self.ramp_item.snapped_edge == "Left":
+                left26 = ((self.deck_width * SCALE) -3) # width - 3 inches offset to mm
+                right26 = (self.deck_width * SCALE)
+                top26 = ((self.deck_width * SCALE) -3)
+                bottom26 =((self.deck_width * SCALE) -3)
+                
+            elif self.ramp_item.snapped_edge == "top":
+                top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm
+                
+                
+                
+            elif self.ramp_item.snapped_edge == "bottom":
+                top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm    
+        
+
+            
+            
+            
+        # normal
+        else:
+            print("NORMAL")
+            
+
+        
+        # umm like stair posts and extra supports
+        
+        for i in self.stair_items:
+                 print(f" STAIR LOG: {i.name} | Edge: {i.snapped_edge} | Offset: {i.offset_value} in from {i.snapped_corner}")
+        
+        
+        
+        
+        
+       
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        print("yay!")
         
 class DraggableItem(QtGui.QGraphicsRectItem):
-    # --- PATH FIX: Accept macro_dir and use it to build texture_path ---
     def __init__(self, rect, color, name="Item", deck_item=None, texture_path=None, parent=None):
-        # Note: texture_path here is now the *full, absolute path*
-        # It was constructed in StairsItem and RampItem
         super(DraggableItem, self).__init__(rect, parent)
         self.name = name
         self.deck_item = deck_item
         
+        # --- Data Storage for Location Reporting ---
+        self.snapped_edge = "None"    # Top, Bottom, Left, Right
+        self.snapped_corner = "None"  # e.g., "Top-Left"
+        self.offset_value = 0.0       # The user-defined inches
+        
         self.setFlag(QtGui.QGraphicsRectItem.ItemIsMovable)
         self.setCacheMode(QtGui.QGraphicsRectItem.DeviceCoordinateCache)
 
+        # --- Texture Loading Code ---
         brush = QtGui.QBrush(QtGui.QColor(color))
-        
-        if texture_path: # texture_path is already the full path
+        if texture_path and os.path.exists(texture_path):
             try:
-                texture_pixmap = QtGui.QPixmap(texture_path) 
+                texture_pixmap = QtGui.QPixmap(texture_path)
                 if not texture_pixmap.isNull():
+                    # Scale the texture to fit the specific item size (36x36, 48x48, etc)
                     scaled_pixmap = texture_pixmap.scaled(
-                        rect.width(), rect.height,
+                        rect.width(), rect.height(),
                         QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.SmoothTransformation
                     )
                     brush = QtGui.QBrush(scaled_pixmap)
                 else:
-                    print(f"Warning: Texture image not found at '{texture_path}'")
+                    print(f"Warning: Pixmap null for {texture_path}")
             except Exception as e:
-                print(f"Error loading texture for {self.name}: {e}. Using solid color.")
-
+                print(f"Error loading texture: {e}")
+        
         self.setBrush(brush)
         self.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0), 1))
         self.add_label()
+
+    def get_snap_positions(self):
+        """Defines the 8 anchor points relative to the deck edges."""
+        if not self.deck_item:
+            return []
+        dr = self.deck_item.rect()
+        iw = self.boundingRect().width()
+        ih = self.boundingRect().height()
         
+        # Returns (Coordinate, Name of the Anchor)
+        return [
+            (QtCore.QPointF(dr.left(), dr.top() - ih), "Top-Left"),
+            (QtCore.QPointF(dr.left() - iw, dr.top()), "Left-Top"),
+            (QtCore.QPointF(dr.right() - iw, dr.top() - ih), "Top-Right"),
+            (QtCore.QPointF(dr.right(), dr.top()), "Right-Top"),
+            (QtCore.QPointF(dr.right() - iw, dr.bottom()), "Bottom-Right"),
+            (QtCore.QPointF(dr.right(), dr.bottom() - ih), "Right-Bottom"),
+            (QtCore.QPointF(dr.left(), dr.bottom()), "Bottom-Left"),
+            (QtCore.QPointF(dr.left() - iw, dr.bottom() - ih), "Left-Bottom")
+        ]
+
+    def mouseReleaseEvent(self, event):
+        super(DraggableItem, self).mouseReleaseEvent(event)
+        
+        snaps = self.get_snap_positions()
+        if not snaps: return
+
+        # 1. Identify nearest anchor point
+        cur = self.pos()
+        min_dist = float('inf')
+        nearest_pt = snaps[0][0]
+        corner_name = snaps[0][1]
+
+        for pt, name in snaps:
+            dist = (pt.x() - cur.x())**2 + (pt.y() - cur.y())**2
+            if dist < min_dist:
+                min_dist = dist
+                nearest_pt = pt
+                corner_name = name
+
+        self.setPos(nearest_pt.x(), nearest_pt.y())
+
+        # 2. Get the offset from the user
+        val, ok = QtGui.QInputDialog.getInt(
+            None, "Placement", f"Inches from {corner_name}:", 
+            int(self.offset_value), -500, 500, 1
+        )
+        if not ok: return
+
+        # 3. Apply Offset Logic & Determine Edge
+        fx, fy = nearest_pt.x(), nearest_pt.y()
+        edge = corner_name.split('-')[0] 
+        
+        if edge in ["Top", "Bottom"]:
+            # Move horizontally (Toward center)
+            fx += float(val) if "Left" in corner_name else -float(val)
+        else:
+            # Move vertically (Toward center)
+            fy += float(val) if "Top" in corner_name else -float(val)
+
+        # 4. Save and Log Data
+        self.setPos(QtCore.QPointF(fx, fy))
+        self.snapped_edge = edge
+        self.snapped_corner = corner_name
+        self.offset_value = float(val)
+        
+        print(f"LOG: {self.name} | Edge: {self.snapped_edge} | Offset: {self.offset_value} in from {self.snapped_corner}")
+
     def add_label(self):
-        # (This function is unchanged)
         label = QtGui.QGraphicsTextItem(self.name, parent=self)
         label.setDefaultTextColor(QtGui.QColor(0, 0, 0))
         item_rect = self.boundingRect()
-        label_bounds = label.boundingRect()
-        x = item_rect.width() / 2 - label_bounds.width() / 2
-        y = item_rect.height() / 2 - label_bounds.height() / 2
-        label.setPos(x, y)
-        
-    def mousePressEvent(self, event):
-        # (This function is unchanged)
-        super(DraggableItem, self).mousePressEvent(event)
-        print(f"Clicked and dragging {self.name}")
-
-    def get_snap_positions(self):
-        # (This function is unchanged)
-        if not self.deck_item:
-            return []
-        deck_rect = self.deck_item.rect()
-        item_w = self.boundingRect().width()
-        item_h = self.boundingRect().height()
-        positions = []
-        positions.append(QtCore.QPointF(deck_rect.left(), deck_rect.top() - item_h))
-        positions.append(QtCore.QPointF(deck_rect.left() - item_w, deck_rect.top()))
-        positions.append(QtCore.QPointF(deck_rect.right() - item_w, deck_rect.top() - item_h))
-        positions.append(QtCore.QPointF(deck_rect.right(), deck_rect.top()))
-        positions.append(QtCore.QPointF(deck_rect.right() - item_w, deck_rect.bottom()))
-        positions.append(QtCore.QPointF(deck_rect.right(), deck_rect.bottom() - item_h))
-        positions.append(QtCore.QPointF(deck_rect.left(), deck_rect.bottom()))
-        positions.append(QtCore.QPointF(deck_rect.left() - item_w, deck_rect.bottom() - item_h))
-        return positions
-        
-    def mouseReleaseEvent(self, event):
-        # (This function is unchanged)
-        super(DraggableItem, self).mouseReleaseEvent(event)
-        current_pos = self.pos()
-        snap_positions = self.get_snap_positions()
-        if not snap_positions:
-            return
-        min_distance_sq = float('inf')
-        nearest_pos = current_pos
-        for snap_pos in snap_positions:
-            dx = snap_pos.x() - current_pos.x()
-            dy = snap_pos.y() - current_pos.y()
-            distance_sq = dx*dx + dy*dy
-            if distance_sq < min_distance_sq:
-                min_distance_sq = distance_sq
-                nearest_pos = snap_pos
-        self.setPos(nearest_pos)
-        print(f"{self.name} snapped to: ({nearest_pos.x():.2f}, {nearest_pos.y():.2f})")
+        font_size = max(5, int(item_rect.height() * 0.15))
+        font = QtGui.QFont("Arial", font_size, QtGui.QFont.Bold)
+        label.setFont(font)
+        lb = label.boundingRect()
+        label.setPos(item_rect.width()/2 - lb.width()/2, item_rect.height()/2 - lb.height()/2)
 
 class StairsItem(DraggableItem):
     # --- PATH FIX: Accept macro_dir and build full path ---
@@ -735,9 +1159,7 @@ def import_ramp_part(main_file_path, index, part, start_angle, end_angle):
     return nested_link
 
 def append_row(sheet_obj, name):
-    """
-    Finds the first empty row in column A and writes the data_list across that row.
-    """
+    #Finds the first empty row in column A and writes the data_list across that row.
     row = 1
     # Find the first row where Column A is empty
     while sheet_obj.getContents(f"A{row}"):
@@ -849,7 +1271,7 @@ def advance_cursor(x, y, heading_deg, forward, lateral=0.0):
     return x_lat, y_lat
 
 # Bigen
-def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
+def ramp_main(main_file,desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     parts_to_import= {}
     parced_desc=desc.split(",")
     feet_of_ramp=0
@@ -872,7 +1294,7 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     
     # CREATING THE MASTER Assembly
     
-
+    """
     # 1. Force the Assembly Module to initialize
     # This registers 'Assembly::AssemblyObject' so addObject can find it
     try:
@@ -902,6 +1324,7 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     # 4. Save the file
     main_file = f"C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/{client}_{site_number}.FCStd"
     doc.saveAs(main_file)
+    """
     
     flat="LAN","TL","TR","UTURNL","UTURNR"
     ramp="8ft","12ft","16ft"
@@ -1087,7 +1510,7 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     # create spreadsheet
     
     doc = App.activeDocument()
-    print(77)
+    
     assembly = None
     for obj in doc.Objects:
         if "Assembly" in obj.Label or obj.isDerivedFrom("App::Part"):
@@ -1110,8 +1533,7 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
     
     #assemble main assembly
     
-
-# --- Prep: ensure we have doc, asm, and the master JointGroup -----------------
+    # --- Prep: ensure we have doc, asm, and the master JointGroup -----------------
 
     doc = FreeCAD.ActiveDocument
     if doc is None:
@@ -1126,12 +1548,7 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
         raise RuntimeError("Master Assembly container not found in the active document.")
 
 # Helper to find the JointGroup ("Joints" container) under the assembly
-    def find_joint_group(asm_obj):
-        for child in getattr(asm_obj, "Group", []):
-            tid = getattr(child, "TypeId", "")
-            if tid == "Assembly::JointGroup" or child.isDerivedFrom("Assembly::JointGroup"):
-                return child
-        return None
+
     # GROUND @####################
     first_link = part_links[0]
     if App.GuiUp:
@@ -1179,13 +1596,6 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
         raise RuntimeError("Assembly joint creation requires FreeCAD running with GUI up.")
 
 # --- Loop: create Fixed joints between consecutive master links ----------------
-    if App.GuiUp:
-        Gui.activateWorkbench("AssemblyWorkbench")
-        # Ensure the assembly is the active edit context
-        Gui.ActiveDocument.setEdit(asm)
-
-# --- Loop: create Fixed joints between consecutive master links ----------------
-    
     for i in range(len(part_links) - 1):
         link_a = part_links[i]
         link_b = part_links[i + 1]
@@ -1221,20 +1631,43 @@ def ramp_main(desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
             # Crucial: This allows the GUI to remain responsive to your clicks
                 QtCore.QCoreApplication.processEvents()
                 time.sleep(0.05)
-        # 4. Use the most stable way to "click" OK in FreeCAD 1.0
+                mw = Gui.getMainWindow()
+        # Send 'Enter' key event to the main window/active focus
+                buttons = mw.findChildren(QtGui.QPushButton)
+                for btn in buttons:
+                    if btn.text() == "OK":
+                        btn.click() # This is a direct Qt click signal
+                        found_button = True
+                        break
 
         except Exception as e:
             print(f"Error at Joint {i}: {str(e)}")
             if Gui.Control.activeDialog():
                 Gui.Control.closeDialog() # 'False' acts as Cancel/Reject
-        
+    
     # 5. Cool-down for the solver to prevent Access Violation
         doc.recompute()
         for _ in range(10):
             QtCore.QCoreApplication.processEvents()
             time.sleep(0.02)
+        
     
-
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     
 #

@@ -23,7 +23,7 @@ prev_solve = prefs.GetBool("SolveInJointCreation", True)
 
 import UtilsAssembly
 from JointObject import Joint, ViewProviderJoint
-
+# Helper to find the JointGroup
 def find_joint_group(asm_obj):
     for child in getattr(asm_obj, "Group", []):
         tid = getattr(child, "TypeId", "")
@@ -335,7 +335,6 @@ class MainForm(QtGui.QWidget):
         if not Client_Name: errors.append("Client Name cannot be empty.")
         if not Site_Number: errors.append("Site Number cannot be empty.")
         if Deck_Length != "" or Deck_Width != "" or Stair_Number != "":
-            print(12234234234)
             deck=True
             if not Deck_Length: errors.append("Deck Length is required.")
             if not Deck_Width: errors.append("Deck Width is required.")
@@ -365,28 +364,71 @@ class MainForm(QtGui.QWidget):
         if ramp: 
         	Drop_Slope = int(Drop_Slope) if Drop_Slope else None
         	Drop_Angle = int(Drop_Angle) if Drop_Angle else None
+        
         if deck:
             Deck_Length = int(Deck_Length)
             Deck_Width = int(Deck_Width)
             Stair_Number = int(Stair_Number)
-            # --- PATH FIX: Pass the macro_dir to the new window ---
             self.deck_designer_window = DeckDesignerWindow(
                 main_file,Deck_Length, Deck_Width, Stair_Number, Inches_Deck,ramp, 
-                self.macro_dir, # Pass the path
+                self.macro_dir, 
                 parent=self
             )
-            # --- END FIX ---
-            self.deck_designer_window.show()
+            print("Deck Designer active. Main script frozen...")
+            self.deck_designer_window.exec_() 
+            print("Deck Designer closed. Resuming script...")
+            
             print("Launched Deck Designer Window.")
-            
-        if ramp and not deck:
-            # call to main ramp
+        
+        if ramp:
             Gui.Control.closeDialog()
-            ramp_main(main_file,Ramp_Desc,Flat_Check,Drop_Slope,Drop_Angle,Client_Name,Site_Number)
+            print(12390)
+            ramp_instance=ramp_class(main_file,Ramp_Desc,Flat_Check,Drop_Slope,Drop_Angle,Client_Name,Site_Number)
+            print(132)
+        
+        for _ in range(20): # Give it 1 full second
+            QtCore.QCoreApplication.processEvents()
+            time.sleep(0.05)
+        doc.recompute()
+        
+        if ramp and deck:
+            doc = App.openDocument(main_file)
+            try:
+                import Assembly
+                # Some versions require the Workbench to be initialized to register types
+                if App.GuiUp:
+                    Gui.activateWorkbench("AssemblyWorkbench")
+                
+            except ImportError:
+                App.Console.PrintError("Assembly Workbench not found. Please ensure FreeCAD 1.0+ is installed.\n")
+        
+            try:
+                asm = doc.addObject("Assembly::AssemblyObject", "Master")
+                doc.recompute()
+            except Exception as e:
+                App.Console.PrintError(f"Error creating assembly object: {str(e)}\n")
             
+            doc.recompute()
+            deck_asm = doc.getObject("Deck")
+            asm.addObject(deck_asm)
+            for obj in doc.Objects:
+                if obj.Label == "Ramp":
+                    print(f"Found object: {obj.Name} ({obj.Label})")
+                    ramp_obj = obj
+            #ramp_asm = doc.getObject("Ramp")
+            asm.addObject(ramp_obj)
+            
+            self.deck_designer_window.ground_joint(asm,doc,deck_asm)
+            link_a=ramp_instance.partlist[0]
+            sub_asm_obj_a = link_a.LinkedObject.Group[3].Name
+            path_a = f"{ramp_obj.Name}.{link_a.Name}.{sub_asm_obj_a}.Face4"
+            self.deck_designer_window.joint_ramp_deck(asm,doc,path_a)
+        
+       
+       
 
 # deck break out
-class DeckDesignerWindow(QtGui.QMainWindow):
+class DeckDesignerWindow(QtGui.QDialog):
     def __init__(self, main_file, deck_length, deck_width, stair_count, inch, ramp, macro_dir, parent=None): # <-- FIX: Added macro_dir
         super(DeckDesignerWindow, self).__init__(parent)
         self.setWindowTitle(f"Deck Designer - {deck_length} x {deck_width}")
@@ -406,9 +448,11 @@ class DeckDesignerWindow(QtGui.QMainWindow):
         self.house_label_item = None  
         self.deck_rect = None       
 
-        self.central_widget = QtGui.QWidget()
-        self.setCentralWidget(self.central_widget)
-        self.master_layout = QtGui.QVBoxLayout(self.central_widget)
+        #self.central_widget = QtGui.QWidget()
+        #self.setCentralWidget(self.central_widget)
+        #self.master_layout = QtGui.QVBoxLayout(self.central_widget)
+        
+        self.master_layout = QtGui.QVBoxLayout(self) # Apply layout directly to self
         
         self.create_design_space()
         
@@ -590,8 +634,8 @@ class DeckDesignerWindow(QtGui.QMainWindow):
 	        self.scene.addItem(ramp)
 	        self.ramp_item = ramp
     
-    def make_post(doc,asm,name):
-        body = doc.addObject('PartDesign::Body', 'Post_Body')
+    def make_post(self,doc,asm,name):
+        body = doc.addObject('PartDesign::Body', f"{name}")
         asm.addObject(body)
         sketch = doc.addObject('Sketcher::SketchObject', 'PostSketch')
         body.addObject(sketch) # This makes it a child of the assembly
@@ -620,7 +664,7 @@ class DeckDesignerWindow(QtGui.QMainWindow):
         pad.Profile = sketch
         body.addObject(pad)
         pad.Type = 4 
-        pad.Length = 29.0 * 25.4 ############################################ HAND RAIL height
+        pad.Length = 40.5 * 25.4 ############################################ HAND RAIL height
         pad.setExpression('Length2', f'Posts_deck.Post_{name}')
         doc.recompute()
     # send OBJ
@@ -668,19 +712,15 @@ class DeckDesignerWindow(QtGui.QMainWindow):
             raise RuntimeError("Assembly joint creation requires FreeCAD running with GUI up.")
 
     # X Y Z
-    def make_joint(self,asm,doc,itemA,itemB,offsetX,offsetY,offsetZ):
+    def make_joint(self,asm,doc,itemA,itemB,offsetX,offsetY,offsetZ,rotX=0, rotY=0, rotZ=0):
         Gui.Selection.clearSelection()
         Gui.Selection.addSelection(doc.Name,'Deck',itemA)
         Gui.Selection.addSelection(doc.Name,'Deck',itemB)
-    
-    
         QtCore.QCoreApplication.processEvents()
         time.sleep(0.1)
-    
         try:
         # 2. Trigger the command
             Gui.runCommand('Assembly_CreateJointFixed')
-        
         # 3. Wait for the Task Panel to be registered
         # We use a short loop to ensure the GUI is ready
             while Gui.Control.activeDialog():
@@ -690,9 +730,12 @@ class DeckDesignerWindow(QtGui.QMainWindow):
                 mw = Gui.getMainWindow()
         # Send 'Enter' key event to the main window/active focus
                 buttons = mw.findChildren(QtGui.QPushButton)
-                for btn in buttons:
+                for btn in buttons:                
                     if btn.text() == "OK":
-                        btn.click() # This is a direct Qt click signal
+                        print("click")
+                        btn.animateClick()
+                        btn.click()
+                        
                         found_button = True
                         break
 
@@ -701,16 +744,17 @@ class DeckDesignerWindow(QtGui.QMainWindow):
             if Gui.Control.activeDialog():
                 Gui.Control.closeDialog() # 'False' acts as Cancel/Reject
         
-        
-        doc.recompute()
         for _ in range(10):
             QtCore.QCoreApplication.processEvents()
             time.sleep(0.02)
 
         joint_grp=find_joint_group(asm)
         new_joint = joint_grp.Group[-1]
-        new_joint.Offset2 = App.Placement(App.Vector(offsetX* 25.4 , offsetY*25.4,offsetZ* 25.4), App.Rotation())
+        rot = App.Rotation(rotZ, rotY, rotX)
+        new_joint.Offset2 = App.Placement(App.Vector(offsetX* 25.4 , offsetY*25.4,offsetZ* 25.4), rot)
         Gui.Selection.clearSelection()
+        
+        
     
     def build_in_freecad(self):
         SCALE = 1 if self.inch_unit else 12
@@ -817,19 +861,18 @@ class DeckDesignerWindow(QtGui.QMainWindow):
     
         except Exception as e:
             App.Console.PrintError(f"Error creating assembly object: {str(e)}\n")
-        
         # POST SHEET
         sheet = doc.addObject("Spreadsheet::Sheet", "Posts_deck")
         asm.addObject(sheet) 
-        append_row(sheet,name)
-        
         # main posts
-        TLP=make_post(doc,asm,"TLP")
-        TRP=make_post(doc,asm,"TRP")
-        BLP=make_post(doc,asm,"BLP")
-        BRP=make_post(doc,asm,"BRP")
-        
-        
+        append_row(sheet,"TLP")
+        TLP=self.make_post(doc,asm,"TLP")
+        append_row(sheet,"TRP")
+        TRP=self.make_post(doc,asm,"TRP")
+        append_row(sheet,"BLP")
+        BLP=self.make_post(doc,asm,"BLP")
+        append_row(sheet,"BRP")
+        BRP=self.make_post(doc,asm,"BRP")
         #main boards
         right26_obj = doc.addObject("Part::Box", "right26")
         right26_obj.Length = (right26 * 25.4)
@@ -860,21 +903,19 @@ class DeckDesignerWindow(QtGui.QMainWindow):
         base=""
         if self.ramp_item:
             if self.ramp_item.snapped_edge == "Right":
+                # frame
                 self.ground_joint(asm,doc,left26_obj)
                 self.make_joint(asm,doc,'top26.Face2','left26.Face4',0,(left26/2)-.75,0)
                 self.make_joint(asm,doc,'bottom26.Face2','left26.Face4',0,-(left26/2)+.75,0)
-                print(top26)
                 self.make_joint(asm,doc,'right26.Face3','left26.Face4',0,0,top26-5)
                 
                 if joists_direct in "length":
                     base="top26.Face3"
                     base1="bottom26.Face4"
-                    
-                    
                 else:
                     base="right26.Face3"
                     base1="left26.Face4"
-                
+                # jiost
                 print(f"{joists_direct}")
                 for i in range(num_of_joists):
                     joist = doc.addObject("Part::Box", f"joist_{i}")
@@ -884,52 +925,64 @@ class DeckDesignerWindow(QtGui.QMainWindow):
                     asm.addObject(joist) 
 
                     self.make_joint(asm,doc,f'joist_{i}.Face1',base,0,((spacing_joists*(i+1))-((right26/2)-.75)),0)
-                    for _ in range(10):
+                    for _ in range(30):
                         QtCore.QCoreApplication.processEvents()
                         time.sleep(0.02)
+                    doc.recompute()
+                
+                print("posts")
+                # posts
+                self.make_joint(asm,doc,'TLP.Face2','top26.Face3',40.5/2-2.75,(top26/2)-1.75,0,0,0,90)
+                for _ in range(30):
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.02)
+                self.make_joint(asm,doc,'TRP.Face2','top26.Face3',40.5/2-2.75,-(top26/2)+1.75,0,0,0,90)
+                for _ in range(30):
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.02)
+                self.make_joint(asm,doc,'BLP.Face4','bottom26.Face4',40.5/2-2.75,(bottom26/2)-1.75,0,0,0,90)
+                for _ in range(30):
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.02)
+                self.make_joint(asm,doc,'BRP.Face4','bottom26.Face4',40.5/2-2.75,-(bottom26/2)+1.75,0,0,0,90)
+                for _ in range(30):
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.02)
+                
+                if self.ramp_item.offset_value == 0:
+                    if self.ramp_item.snapped_corner == "Right-Top":
+                        append_row(sheet,"Ramp_post_2")
+                        TLP=self.make_post(doc,asm,"Ramp_post_2")
+                        time.sleep(12)
+                        self.make_joint(asm,doc,'Ramp_post_2.Face2','TRP.Face4',0,0,-48,0,0,0)
+                        
+                    elif self.ramp_item.snapped_corner == "Right-bottom":
+                        append_row(sheet,"Ramp_post_2")
+                        TLP=self.make_post(doc,asm,"Ramp_post_2")
+                        self.make_joint(asm,doc,'Ramp_post_2.Face2','right26.Face4',40.5/2-2.75,-(right26/2)+1.75,0,0,0,90)	
+                        
+                        
                 
                 
                     
                 
             
-             # el if
-             #
-             #  if el
-             
-             
-             
-             print(f" RAMP LOG: {self.ramp_item.name} | Edge: {self.ramp_item.snapped_edge} | Offset: {self.ramp_item.offset_value} in from {self.ramp_item.snapped_corner}")
-             
-             
-             
-             
-             
-             
-             
-             
-             
-             
-             
-             
-             
-             
-             
-             
-             
-             
-
+            # el if
+            #
+            #  if el
+                print(f" RAMP LOG: {self.ramp_item.name} | Edge: {self.ramp_item.snapped_edge} | Offset: {self.ramp_item.offset_value} in from {self.ramp_item.snapped_corner}")
             elif self.ramp_item.snapped_edge == "Left":
                 left26 = ((self.deck_width * SCALE) -3) # width - 3 inches offset to mm
                 right26 = (self.deck_width * SCALE)
                 top26 = ((self.deck_width * SCALE) -3)
                 bottom26 =((self.deck_width * SCALE) -3)
                 
-            elif self.ramp_item.snapped_edge == "top":
+            elif self.ramp_item.snapped_edge == "Top":
                 top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm
                 
                 
                 
-            elif self.ramp_item.snapped_edge == "bottom":
+            elif self.ramp_item.snapped_edge == "Bottom":
                 top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm    
         
 
@@ -939,29 +992,104 @@ class DeckDesignerWindow(QtGui.QMainWindow):
         # normal
         else:
             print("NORMAL")
+        
+        """
+        support_width=False
+        support_length=False
+        
+        support_extra=False
+        shared_beam_post=None
+        
+        
+        beam_die=None
+        # extra
+        if (self.deck_width * SCALE) > 96:
+            support_width=True  
+        if (self.deck_length * SCALE) > 96:
+            support_length=True
             
+        if (support_width):
+            beam_die="Length"
+        if (support_length) :
+            beam_die="width"
+        
+        
+        if support_width:
+            if self.ramp_item:
+                if self.ramp_item.snapped_edge in ["Top","Bottom"]:
+                    support_extra=True
+            
+            if support_extra = =True:
+                for i in self.stair_items:
+                    if i.snapped_edge in ["Top","Bottom"]:
+                        if self.ramp_item.snapped_edge != i.snapped_edge:
+                            if self.ramp_item.offset_value == i.offset_value:
+                                shared_beam_post=f"{i.Name}"
+                                support_extra=False
+                                
+            print(shared_beam_post)            
+        """            
+    def joint_ramp_deck(self,asm,doc,path):
+        itemA=path
+        if self.ramp_item.snapped_edge == "Right":
+            itemB='Deck.right26.Face4'
+        offsetX=0
+        offsetY=0
+        offsetZ=0
+        
+        rotZ=0
+        rotY=180
+        rotX=0
+        
+        Gui.Selection.clearSelection()
+        Gui.Selection.addSelection(doc.Name,'Master',itemA)
+        Gui.Selection.addSelection(doc.Name,'Master',itemB)
+    
+        QtCore.QCoreApplication.processEvents()
+        time.sleep(0.1)
+    
+        try:
+        # 2. Trigger the command
+            Gui.runCommand('Assembly_CreateJointFixed')
+        
+        # 3. Wait for the Task Panel to be registered
+        # We use a short loop to ensure the GUI is ready
+            while Gui.Control.activeDialog():
+            # Crucial: This allows the GUI to remain responsive to your clicks
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.05)
+                mw = Gui.getMainWindow()
+        # Send 'Enter' key event to the main window/active focus
+                buttons = mw.findChildren(QtGui.QPushButton)
+                for btn in buttons:
+                    
+                    if btn.text() == "OK":
+                        print("click")
+                        btn.animateClick()
+                        btn.click()
+                        
+                        found_button = True
+                        break
 
+        except Exception as e:
+            print(f"Error at Joint {i}: {str(e)}")
+            if Gui.Control.activeDialog():
+                Gui.Control.closeDialog() # 'False' acts as Cancel/Reject
         
-        # umm like stair posts and extra supports
-        
-        for i in self.stair_items:
-                 print(f" STAIR LOG: {i.name} | Edge: {i.snapped_edge} | Offset: {i.offset_value} in from {i.snapped_corner}")
-        
-        
-        
-        
-        
-       
-        
-        
-        
-        
-        
+        for _ in range(10):
+            QtCore.QCoreApplication.processEvents()
+            time.sleep(0.02)
+
+        joint_grp=find_joint_group(asm)
+        new_joint = joint_grp.Group[-1]
+        rot = App.Rotation(rotZ, rotY, rotX)
+        new_joint.Offset2 = App.Placement(App.Vector(offsetX* 25.4 , offsetY*25.4,offsetZ* 25.4), rot)
+        Gui.Selection.clearSelection()
         
         
+            
         
         
-        print("yay!")
         
 class DraggableItem(QtGui.QGraphicsRectItem):
     def __init__(self, rect, color, name="Item", deck_item=None, texture_path=None, parent=None):
@@ -1100,7 +1228,325 @@ class RampItem(DraggableItem):
                 texture_path=full_texture_path, # Pass the full path
                 parent=parent
             )
+    
+class ramp_class():
+    
+    def __init__(self,main_file,desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
+        print(567)
+        self.desc=desc
+        self.ending_flat=ending_flat
+        self.Drop_Slope=Drop_Slope
+        self.Drop_Angle=Drop_Angle
+        self.client=client
+        self.site_number=site_number
+        self.partlist = []
+        self.partlist=self.ramp_main(main_file,desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number)
+        
+    def ramp_main(self,main_file,desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
+            print(21)
+            parts_to_import= {}
+            parced_desc=desc.split(",")
+            feet_of_ramp=0
+            for i in parced_desc:
+                if i == "8ft":
+                    feet_of_ramp+=8
+                elif i == "12ft":
+                    feet_of_ramp+=12
+                elif i == "16ft":
+                    feet_of_ramp+=16
+    
+            # Slope
+            if (Drop_Slope != None): # inch of feet
+                angle_radians = math.atan(Drop_Slope / (feet_of_ramp*12))
+                angle=math.degrees(angle_radians)
+            else:
+                angle=Drop_Angle
             
+            doc = App.openDocument(main_file)
+            asm = doc.addObject("Assembly::AssemblyObject", "Assembly")
+            asm.Label = f"Ramp"
+            doc.recompute()
+            
+            flat="LAN","TL","TR","UTURNL","UTURNR"
+            ramp="8ft","12ft","16ft"
+            boxes={}
+            current_x = 0
+            current_y = 0
+            current_heading = 0
+            #
+            # Allways send angle
+            # current_x, current_y, index, name, length=0, width=0, heading=0
+            for index,part in enumerate(parced_desc):
+                if index > 0:  	
+                    part_before = parced_desc[index - 1]
+                if index < len(parced_desc) - 1:
+                    part_after = parced_desc[index + 1]
+                # if part first
+                print("inde x  "+str(index))
+                if (index == 0):
+                    current_x=0
+                    current_y=0
+                    if (part in ramp):
+                        if (part_after in flat):
+                            # 05_XX_05
+                            parts_to_import[index]="A_"+part+"_A"
+                            boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part+"_A",current_heading)
+                        elif (part_after in ramp):
+                        # 05_XX
+                            parts_to_import[index]="A_"+part
+                            boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part,current_heading)
+                    else:
+                        parts_to_import[index]=part
+                        boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part,current_heading)
+                # Last // ENDING   
+                elif (index == len(parced_desc)-1):
+                    if (part_before in flat):
+                        # 05_XX_ ENDING
+                        parts_to_import[index]="A_"+part+"_END"
+                        boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part+"_END",current_heading)
+                    else:
+                        # __XX_ ENDING
+                        parts_to_import[index]=""+part+"_END"
+                        boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part+"_END",current_heading)
+                # normal
+                # btween 2 flat
+                elif (part_before in flat and part in ramp and part_after in flat):
+                    # 05_XX_05
+                    parts_to_import[index]="A_"+part+"_A"
+                    boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part+"_A",current_heading)
+                # one side angled:
+                elif (((part_before in flat) or (part_after in flat)) and part in ramp):
+                    if (part_before in flat):
+                        # 05_XX
+                        parts_to_import[index]="_A"+part
+                        boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"_A"+part,current_heading)
+                    else:
+                        # XX_05
+                        parts_to_import[index]=part+"_A"
+                        boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part+"_A",current_heading)
+                # XX normal RAMP
+                elif (part_before in ramp and part in ramp and part_after in ramp):
+                    parts_to_import[index]=part
+                    boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part,current_heading)
+                elif (part in flat):
+                    # place flats
+                    parts_to_import[index]=part
+                    boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part,current_heading)
+                else:
+                    print("NO NO NO NO - A part was NOT imported HELP HELP HELP"+part)
+        # curs
+        # should always be the top center line
+        
+        # patch for now
+                current_y -= boxes[f"{index}_{part}"].length
+        #current_x = boxes[f"{index}_{part}"].width
+        
+        
+        # Do this in the class
+            """
+        length = boxes[f"{index}_{part}"].length
+        width = boxes[f"{index}_{part}"].width
+
+        # Compute movement and heading updates per part type
+        if part in ("8ft", "12ft", "16ft", "LAN"):
+        # Straight run or inline landing: advance full length
+            #current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length, lateral=0.0)
+            None
+
+        elif part == "TL":
+            # 90° left turn landing: half forward, then left by width/2, then rotate left
+            current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length/2.0, lateral=+width/2.0)
+            current_heading = (current_heading - 90) % 360
+
+        elif part == "TR":
+            # 90° right turn landing: half forward, then right by width/2, then rotate right
+            current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length/2.0, lateral=-width/2.0)
+            current_heading = (current_heading + 90) % 360
+
+        elif part == "UTURN":
+           # 180° turn landing: choose your intent.
+           # Option A (exit from far edge center): full forward, then rotate 180°
+           current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length, lateral=0.0)
+           current_heading = (current_heading + 180) % 360
+
+           # Option B (exit from midline): half forward, rotate 180°
+           # current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length/2.0, lateral=0.0)
+           # current_heading = (current_heading + 180) % 360
+
+        else:
+           print("Unknown part type for cursor logic:", part)
+           
+            """
+            # List for imported links into master
+            part_links = []
+            # RAMP POST alg
+            # Create a SET of 
+            print("importin")
+            for key,value in parts_to_import.items():
+                if  "8ft" in value:
+                    if "A_8ft_A" == value:
+                        new_link = import_ramp_part(main_file,key,"8ft",angle,angle)
+                    elif "A_8ft" == value:
+                        new_link = import_ramp_part(main_file,key,"8ft",angle,0)
+                    elif "8ft_A" == value:
+                        new_link = import_ramp_part(main_file,key,"8ft",0,angle)
+                    elif "8ft" == value:
+                        new_link = import_ramp_part(main_file,key,"8ft",0,0)
+                    elif "END" in value:
+                        #A_"+part+"END
+                        #"+part+"END
+                        if ending_flat:
+                            if "A_8ft_END" == value:
+                                print("you NEED TO ADD THIS")
+                            elif "8ft_END" == value:
+                                print("you NEED TO ADD THIS")
+                            else:
+                                print("BAD BAD BAD : "+value)
+                        else:
+                            if "A_8ft_END":
+                                print("someing")
+                            elif "8ft_END":
+                                print("see")
+                            else:
+                                print("BAD BAD BAD : "+value)
+                    else:
+                        print("BAD BAD BAD : "+value)
+                elif  "12ft" in value:
+                    print("hui")
+                elif  "16ft" in value:
+                    print("hui")       
+                # Add link to be connected
+                if new_link:
+                    part_links.append(new_link)
+            #So like testing the post thing now
+            temp_post_big = {}
+            for name,box in boxes.items():
+                for key,value in box.cords.items():
+                    if value != None:
+                        temp_post_big[f"{name}_{key}"]=value
+            post_final={}
+            seen_points = set()
+            for key,val in temp_post_big.items():
+                point_tuple = (val['x'], val['y'])
+                if point_tuple not in seen_points:
+                    post_final[key] = val
+                    seen_points.add(point_tuple)
+            for k,v in post_final.items():
+                print(f"{k}: {v}")
+            # get posts to set to box 
+            # create post stuff??
+            # create spreadsheet
+            doc = App.activeDocument()
+            assembly = None
+            for obj in doc.Objects:
+                if "Assembly" in obj.Label or obj.isDerivedFrom("App::Part"):
+                    assembly = obj
+                    break
+                if not assembly:
+                    print("Assembly object not found.")
+                    return
+            sheet = doc.addObject("Spreadsheet::Sheet", "Posts_Ramp")
+            assembly.addObject(sheet)
+            for name,points in post_final.items():
+                append_row(sheet,name)
+                make_post_sketch(main_file,name,angle)
+                # schetch? -> spreadsheet -> pan (extend) 2 ways one as var -> draft on face based on angle
+            #assemble main assembly
+            # GROUND @####################
+            first_link = part_links[0]
+            doc = FreeCAD.ActiveDocument
+            if doc is None:
+                raise RuntimeError("No active FreeCAD document.")
+            # Helper to find the JointGroup ("Joints" container) under the assembly
+            def find_joint_group(asm_obj):
+                for child in getattr(asm_obj, "Group", []):
+                    tid = getattr(child, "TypeId", "")
+                    if tid == "Assembly::JointGroup" or child.isDerivedFrom("Assembly::JointGroup"):
+                        return child
+                return None
+            if App.GuiUp:
+                Gui.activateWorkbench("AssemblyWorkbench")
+                Gui.ActiveDocument.setEdit(asm)
+            
+            Gui.Selection.clearSelection()
+            Gui.Selection.addSelection(doc.Name, first_link.Name)
+            is_already_grounded = getattr(first_link, "Grounded", False)
+            if not is_already_grounded:
+                try:
+                    Gui.runCommand('Assembly_ToggleGrounded',0)
+                    doc.recompute()
+                    print(f"Grounded the root element: {first_link.Name}\n")
+                except Exception as e:
+                    print(f"Failed to ground {first_link.Name}: {str(e)}\n")
+            else:
+                print(f"{first_link.Label} was already grounded. Skipping toggle.")
+            joints_grp = find_joint_group(asm)
+            if joints_grp is None:
+                doc.recompute()
+                joints_grp = find_joint_group(asm)
+                if joints_grp is None:
+                    joints_grp = doc.addObject("Assembly::JointGroup", "Joints")
+                    asm.Group = asm.Group + [joints_grp]
+                    doc.recompute()
+            if App.GuiUp:
+                Gui.activateWorkbench("AssemblyWorkbench")
+                Gui.ActiveDocument.setEdit(asm)
+            # --- Loop: create Fixed joints between consecutive master links ----------------
+            for i in range(len(part_links) - 1):
+                link_a = part_links[i]
+                link_b = part_links[i + 1]
+                
+                sub_asm_obj_a = link_a.LinkedObject.Group[4].Name
+                sub_asm_obj_b = link_b.LinkedObject.Group[3].Name 
+                
+                path_a = f"{link_a.Name}.{sub_asm_obj_a}.Face4"
+                path_b = f"{link_b.Name}.{sub_asm_obj_b}.Face4"
+                
+                print(sub_asm_obj_a+" "+ sub_asm_obj_b)
+                if link_a.Name == link_b.Name:
+                    continue
+                Gui.Selection.clearSelection()
+                Gui.Selection.addSelection(doc.Name, 'Assembly', path_a)
+                Gui.Selection.addSelection(doc.Name, 'Assembly', path_b)
+                # Let the GUI thread process the selection
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.1)
+                try:
+                    Gui.runCommand('Assembly_CreateJointFixed')
+                    while Gui.Control.activeDialog():
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.05)
+                        mw = Gui.getMainWindow()
+                        buttons = mw.findChildren(QtGui.QPushButton)
+                        for btn in buttons:
+                            if btn.text() == "OK":
+                                btn.click() # This is a direct Qt click signal
+                                found_button = True
+                                break
+                except Exception as e:
+                    print(f"Error at Joint {i}: {str(e)}")
+                    if Gui.Control.activeDialog():
+                        Gui.Control.closeDialog() # 'False' acts as Cancel/Reject
+                for _ in range(10):
+                    QtCore.QCoreApplication.processEvents()
+                    time.sleep(0.02)
+            print("RAMP DONE _______________")
+            return part_links
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
 
 def import_ramp_part(main_file_path, index, part, start_angle, end_angle):
     # 1. Setup paths
@@ -1171,9 +1617,7 @@ def append_row(sheet_obj, name):
     App.activeDocument().recompute()     
 
 def make_post_sketch(main_file,name,angle=0):
-    
     doc = App.activeDocument()
-    
     assembly = None
     for obj in doc.Objects:
         if "Assembly" in obj.Label or obj.isDerivedFrom("App::Part"):
@@ -1252,9 +1696,6 @@ def make_post_sketch(main_file,name,angle=0):
         
         doc.recompute()
 
-#
-##
-#
 #   I PROB DONT NEED TGHIS
 def advance_cursor(x, y, heading_deg, forward, lateral=0.0):
     rad = math.radians(heading_deg)
@@ -1269,406 +1710,6 @@ def advance_cursor(x, y, heading_deg, forward, lateral=0.0):
     y_lat = y_fwd + lateral * ( math.cos(rad))
 
     return x_lat, y_lat
-
-# Bigen
-def ramp_main(main_file,desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
-    parts_to_import= {}
-    parced_desc=desc.split(",")
-    feet_of_ramp=0
-    for i in parced_desc:
-        if i == "8ft":
-            feet_of_ramp+=8
-        elif i == "12ft":
-            feet_of_ramp+=12
-        elif i == "16ft":
-            feet_of_ramp+=16
-    
-    # Slope
-    if (Drop_Slope != None): # inch of feet
-        angle_radians = math.atan(Drop_Slope / (feet_of_ramp*12))
-        angle=math.degrees(angle_radians)
-    else:
-        angle=Drop_Angle
-    
-    
-    
-    # CREATING THE MASTER Assembly
-    
-    """
-    # 1. Force the Assembly Module to initialize
-    # This registers 'Assembly::AssemblyObject' so addObject can find it
-    try:
-        import Assembly
-        # Some versions require the Workbench to be initialized to register types
-        if App.GuiUp:
-            Gui.activateWorkbench("AssemblyWorkbench")
-    except ImportError:
-        App.Console.PrintError("Assembly Workbench not found. Please ensure FreeCAD 1.0+ is installed.\n")
-
-    # 2. Create your document
-    doc = App.newDocument(f"{client}_{site_number}")
-
-    # 3. Create the Assembly Container using the formal Wiki type
-    try:
-        # Based on the documentation: 'Assembly::AssemblyObject'
-        asm = doc.addObject("Assembly::AssemblyObject", "Assembly")
-        asm.Label = f"Assembly_{client}"
-    
-    # Trigger a recompute to generate the default 'Origin' and 'Joints' 
-    # containers mentioned in the wiki.
-        doc.recompute()
-    
-    except Exception as e:
-        App.Console.PrintError(f"Error creating assembly object: {str(e)}\n")
-
-    # 4. Save the file
-    main_file = f"C:/Users/weshu/OneDrive/Desktop/IMPACT Assets/Big Rework/Temp/{client}_{site_number}.FCStd"
-    doc.saveAs(main_file)
-    """
-    
-    flat="LAN","TL","TR","UTURNL","UTURNR"
-    ramp="8ft","12ft","16ft"
-    boxes={}
-    current_x = 0
-    current_y = 0
-    current_heading = 0
-    #
-    # Allways send angle
-    # current_x, current_y, index, name, length=0, width=0, heading=0
-    for index,part in enumerate(parced_desc):
-      
-        if index > 0:  	
-        	part_before = parced_desc[index - 1]
-        if index < len(parced_desc) - 1:
-        	part_after = parced_desc[index + 1]
-        # if part first
-        print("inde x  "+str(index))
-        if (index == 0):
-            current_x=0
-            current_y=0
-            if (part in ramp):
-            	if (part_after in flat):
-                		# 05_XX_05
-            		parts_to_import[index]="A_"+part+"_A"
-            		boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part+"_A",current_heading)
-            	elif (part_after in ramp):
-                   		# 05_XX
-                   		parts_to_import[index]="A_"+part
-                   		boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part,current_heading)
-            else:
-            	parts_to_import[index]=part
-            	boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part,current_heading)
-        # Last // ENDING   
-        elif (index == len(parced_desc)-1):
-            if (part_before in flat):
-                # 05_XX_ ENDING
-                parts_to_import[index]="A_"+part+"_END"
-                boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part+"_END",current_heading)
-            else:
-                # __XX_ ENDING
-                parts_to_import[index]=""+part+"_END"
-                boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part+"_END",current_heading)
-        #normal
-        # btween 2 flat
-        elif (part_before in flat and part in ramp and part_after in flat):
-        	# 05_XX_05
-        	parts_to_import[index]="A_"+part+"_A"
-        	boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"A_"+part+"_A",current_heading)
-        # one side angled:
-        elif (((part_before in flat) or (part_after in flat)) and part in ramp):
-            if (part_before in flat):
-                # 05_XX
-                parts_to_import[index]="_A"+part
-                boxes[f"{index}_{part}"]=Box(current_x,current_y,index,"_A"+part,current_heading)
-            else:
-                # XX_05
-                parts_to_import[index]=part+"_A"
-                boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part+"_A",current_heading)
-        elif (part_before in ramp and part in ramp and part_after in ramp):
-            # XX normal RAMP
-            parts_to_import[index]=part
-            boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part,current_heading)
-        elif (part in flat):
-            # place flats
-            parts_to_import[index]=part
-            boxes[f"{index}_{part}"]=Box(current_x,current_y,index,part,current_heading)
-        else:
-            print("NO NO NO NO - A part was NOT imported HELP HELP HELP"+part)
-        # curs
-        # should always be the top center line
-        
-        # patch for now
-        current_y -= boxes[f"{index}_{part}"].length
-        #current_x = boxes[f"{index}_{part}"].width
-        
-        
-        # Do this in the class
-        """
-        length = boxes[f"{index}_{part}"].length
-        width = boxes[f"{index}_{part}"].width
-
-        # Compute movement and heading updates per part type
-        if part in ("8ft", "12ft", "16ft", "LAN"):
-        # Straight run or inline landing: advance full length
-            #current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length, lateral=0.0)
-            None
-
-        elif part == "TL":
-            # 90° left turn landing: half forward, then left by width/2, then rotate left
-            current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length/2.0, lateral=+width/2.0)
-            current_heading = (current_heading - 90) % 360
-
-        elif part == "TR":
-            # 90° right turn landing: half forward, then right by width/2, then rotate right
-            current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length/2.0, lateral=-width/2.0)
-            current_heading = (current_heading + 90) % 360
-
-        elif part == "UTURN":
-           # 180° turn landing: choose your intent.
-           # Option A (exit from far edge center): full forward, then rotate 180°
-           current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length, lateral=0.0)
-           current_heading = (current_heading + 180) % 360
-
-           # Option B (exit from midline): half forward, rotate 180°
-           # current_x, current_y = advance_cursor(current_x, current_y, current_heading,forward=length/2.0, lateral=0.0)
-           # current_heading = (current_heading + 180) % 360
-
-        else:
-           print("Unknown part type for cursor logic:", part)
-           
-        """
-    # List for imported links into master
-    part_links = []
-    for key,value in parts_to_import.items():
-        
-        #
-        # RAMP POST alg
-        # Create a SET of 
-        #
-        
-        if  "8ft" in value:
-            if "A_8ft_A" == value:
-                new_link = import_ramp_part(main_file,key,"8ft",angle,angle)
-            elif "A_8ft" == value:
-                new_link = import_ramp_part(main_file,key,"8ft",angle,0)
-            elif "8ft_A" == value:
-                new_link = import_ramp_part(main_file,key,"8ft",0,angle)
-            elif "8ft" == value:
-                new_link = import_ramp_part(main_file,key,"8ft",0,0)
-            elif "END" in value:
-                #A_"+part+"END
-                #"+part+"END
-                if ending_flat:
-                    if "A_8ft_END" == value:
-                        print("you NEED TO ADD THIS")
-                    elif "8ft_END" == value:
-                        print("you NEED TO ADD THIS")
-                    else:
-                        print("BAD BAD BAD : "+value)
-                else:
-                    if "A_8ft_END":
-                        print("someing")
-                    elif "8ft_END":
-                        print("see")
-                    else:
-                        print("BAD BAD BAD : "+value)
-            else:
-                print("BAD BAD BAD : "+value)
-        elif  "12ft" in value:
-            print("hui")
-        elif  "16ft" in value:         
-            print("hui")       
-        
-        #
-        # Add link to be connected
-        if new_link:
-           part_links.append(new_link)
-    
-    
-    #So like testing the post thing now
-    temp_post_big = {}
-    for name,box in boxes.items():
-        for key,value in box.cords.items():
-            if value != None:
-                temp_post_big[f"{name}_{key}"]=value
-    post_final={}
-    seen_points = set()
-    for key,val in temp_post_big.items():
-        point_tuple = (val['x'], val['y'])
-        if point_tuple not in seen_points:
-            post_final[key] = val
-            seen_points.add(point_tuple)
-        
-
-    for k,v in post_final.items():
-        print(f"{k}: {v}")
-        
-    
-    # get posts to set to box 
-    
-    # create post stuff??
-    # create spreadsheet
-    
-    doc = App.activeDocument()
-    
-    assembly = None
-    for obj in doc.Objects:
-        if "Assembly" in obj.Label or obj.isDerivedFrom("App::Part"):
-            assembly = obj
-            break
-    
-    if not assembly:
-        print("Assembly object not found.")
-        return
-    
-    sheet = doc.addObject("Spreadsheet::Sheet", "Posts_Ramp")
-    assembly.addObject(sheet)
-    for name,points in post_final.items():
-        append_row(sheet,name)
-        make_post_sketch(main_file,name,angle)
-            
-        
-    # schetch? -> spreadsheet -> pan (extend) 2 ways one as var -> draft on face based on angle
-    
-    
-    #assemble main assembly
-    
-    # --- Prep: ensure we have doc, asm, and the master JointGroup -----------------
-
-    doc = FreeCAD.ActiveDocument
-    if doc is None:
-        raise RuntimeError("No active FreeCAD document.")
-
-# If 'asm' already exists from earlier code, keep it; otherwise find the master assembly container.
-    try:
-        asm  # check if variable is already in scope
-    except NameError:
-        asm = next((o for o in doc.Objects if getattr(o, "TypeId", "") == "Assembly::AssemblyObject"), None)
-    if asm is None:
-        raise RuntimeError("Master Assembly container not found in the active document.")
-
-# Helper to find the JointGroup ("Joints" container) under the assembly
-
-    # GROUND @####################
-    first_link = part_links[0]
-    if App.GuiUp:
-        Gui.activateWorkbench("AssemblyWorkbench")
-        # Puts the assembly into 'edit' context so it can receive constraints
-        Gui.ActiveDocument.setEdit(asm)
-    
-    # 1. Select the first link
-    Gui.Selection.clearSelection()
-    # Grounding usually targets the object itself, not a specific face
-    Gui.Selection.addSelection(doc.Name, first_link.Name)
-    
-    # 2. Run the Ground command
-    # This command toggles the 'Grounded' status of the selected element
-    is_already_grounded = getattr(first_link, "Grounded", False)
-    if not is_already_grounded:
-        try:
-            Gui.runCommand('Assembly_ToggleGrounded',0)
-            doc.recompute()
-            print(f"Grounded the root element: {first_link.Name}\n")
-        except Exception as e:
-            print(f"Failed to ground {first_link.Name}: {str(e)}\n")
-    else:
-        print(f"{first_link.Label} was already grounded. Skipping toggle.")
-        
-    # Get (or create) the JointGroup
-    joints_grp = find_joint_group(asm)
-    if joints_grp is None:
-        doc.recompute()
-        joints_grp = find_joint_group(asm)
-        if joints_grp is None:
-        # Fallback: create the Joints container if this build didn't auto-create it
-            joints_grp = doc.addObject("Assembly::JointGroup", "Joints")
-            asm.Group = asm.Group + [joints_grp]
-            doc.recompute()
-
-# Activate the Assembly WB so joint commands are available and land in the master
-    if App.GuiUp:
-        Gui.activateWorkbench("AssemblyWorkbench")
-        try:
-            Gui.ActiveDocument.setEdit(asm)  # set master assembly as active edit context
-        except Exception:
-            pass
-    else:
-        raise RuntimeError("Assembly joint creation requires FreeCAD running with GUI up.")
-
-# --- Loop: create Fixed joints between consecutive master links ----------------
-    for i in range(len(part_links) - 1):
-        link_a = part_links[i]
-        link_b = part_links[i + 1]
-        
-        sub_asm_obj_a = link_a.LinkedObject.Group[4].Name
-        sub_asm_obj_b = link_b.LinkedObject.Group[3].Name 
-        
-        path_a = f"{link_a.Name}.{sub_asm_obj_a}.Face4"
-        path_b = f"{link_b.Name}.{sub_asm_obj_b}.Face4"
-        
-    
-        print(sub_asm_obj_a+" "+ sub_asm_obj_b)
-
-        if link_a.Name == link_b.Name:
-            continue
-
-    # 1. Clear and Select
-        Gui.Selection.clearSelection()
-        Gui.Selection.addSelection(doc.Name, 'Assembly', path_a)
-        Gui.Selection.addSelection(doc.Name, 'Assembly', path_b)
-    
-    # Let the GUI thread process the selection
-        QtCore.QCoreApplication.processEvents()
-        time.sleep(0.1)
-    
-        try:
-        # 2. Trigger the command
-            Gui.runCommand('Assembly_CreateJointFixed')
-        
-        # 3. Wait for the Task Panel to be registered
-        # We use a short loop to ensure the GUI is ready
-            while Gui.Control.activeDialog():
-            # Crucial: This allows the GUI to remain responsive to your clicks
-                QtCore.QCoreApplication.processEvents()
-                time.sleep(0.05)
-                mw = Gui.getMainWindow()
-        # Send 'Enter' key event to the main window/active focus
-                buttons = mw.findChildren(QtGui.QPushButton)
-                for btn in buttons:
-                    if btn.text() == "OK":
-                        btn.click() # This is a direct Qt click signal
-                        found_button = True
-                        break
-
-        except Exception as e:
-            print(f"Error at Joint {i}: {str(e)}")
-            if Gui.Control.activeDialog():
-                Gui.Control.closeDialog() # 'False' acts as Cancel/Reject
-    
-    # 5. Cool-down for the solver to prevent Access Violation
-        doc.recompute()
-        for _ in range(10):
-            QtCore.QCoreApplication.processEvents()
-            time.sleep(0.02)
-        
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
     
 #
 # MAIN

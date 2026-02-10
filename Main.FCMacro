@@ -12,6 +12,7 @@ import sys
 import math
 import shutil
 import os
+import re
 import math
 from PySide import QtCore, QtGui
 
@@ -491,7 +492,7 @@ class DeckDesignerWindow(QtGui.QDialog):
         self.add_components()
         self.update_house_label(self.house_side_combo.currentText())
         
-        
+    
         
     def resizeEvent(self, event):
         """ This ensures the deck scales when the window is resized. """
@@ -633,7 +634,7 @@ class DeckDesignerWindow(QtGui.QDialog):
 	        ramp.setPos(ramp_x_pos, 0)
 	        self.scene.addItem(ramp)
 	        self.ramp_item = ramp
-    
+    # in the corret assm
     def make_post(self,doc,asm,name):
         body = doc.addObject('PartDesign::Body', f"{name}")
         asm.addObject(body)
@@ -700,8 +701,7 @@ class DeckDesignerWindow(QtGui.QDialog):
                 joints_grp = doc.addObject("Assembly::JointGroup", "Joints")
                 asm.Group = asm.Group + [joints_grp]
                 doc.recompute()
-
-# Activate the Assembly WB so joint commands are available and land in the master
+        # Activate the Assembly WB so joint commands are available and land in the master
         if App.GuiUp:
             Gui.activateWorkbench("AssemblyWorkbench")
             try:
@@ -759,87 +759,47 @@ class DeckDesignerWindow(QtGui.QDialog):
     def build_in_freecad(self):
         SCALE = 1 if self.inch_unit else 12
         
-        right26=None
-        left26=None
-        top26=None
-        bottom26=None
-
-        # joists   
-        if (self.deck_width == self.deck_length) or (self.deck_width > self.deck_length):
-            joists_direct="width"
-            num_of_joists=((self.deck_width * SCALE)//24)
-            
-            if (self.deck_width * SCALE) % 24:
-                num_of_joists=((self.deck_width * SCALE) / 24) -1
-            else:
-                num_of_joists=((self.deck_width * SCALE)//24)
-                
-                
-            
-            spacing_joists=((self.deck_width * SCALE)-3) / (num_of_joists + 1) ############### -3 might be wrong \_('>')_/
-        else:
-            joists_direct="length"
-            if (self.deck_width * SCALE) % 24:
-                num_of_joists=((self.deck_width * SCALE) / 24) -1
-            else:
-                num_of_joists=((self.deck_width * SCALE)//24)
-            spacing_joists=((self.deck_length * SCALE)-3) / (num_of_joists + 1) ############### -3 might be wrong \_('>')_/
+        self.right26=None
+        self.left26=None
+        self.top26=None
+        self.bottom26=None
         
-        
-        if (joists_direct == "length"):
-            if self.ramp_item:
-                if self.ramp_item.snapped_edge in ["Top","Bottom"]:
-                    joists_length=((self.deck_length * SCALE) -8) * 25.4 ############ might be crazy wrong
-                else:
-                   joists_length=((self.deck_length * SCALE) -3) * 25.4
-            else:
-                joists_length=((self.deck_length * SCALE) -3) * 25.4
-        else:
-            if self.ramp_item:
-               if self.ramp_item.snapped_edge in ["Right","Left"]:
-                    joists_length=((self.deck_width * SCALE) -8) * 25.4 ########
-               else:
-                   joists_length=((self.deck_width * SCALE) -3) * 25.4
-            else:
-                joists_length=((self.deck_width * SCALE) -3) * 25.4
-        print(f"joists_direct {joists_direct}   num_of_runners : {num_of_joists}  spacing_joists {spacing_joists} joists_length {joists_length}" )
-        
-        #
+                #
         # ops length needs to be shorten 1.5inches
         if self.ramp_item:
             # ramp self.ramp_item.snapped_edge
             if self.ramp_item.snapped_edge == "Right":
-                right26 = ((self.deck_width * SCALE) -3)# width - 3 inches offset to mm
-                left26 = (self.deck_width * SCALE)
-                top26 = ((self.deck_length * SCALE) -3)
-                bottom26 = ((self.deck_length * SCALE) -3)
+                self.right26 = ((self.deck_width * SCALE) -3)# width - 3 inches offset to mm
+                self.left26 = (self.deck_width * SCALE)
+                self.top26 = ((self.deck_length * SCALE) -3)
+                self.bottom26 = ((self.deck_length * SCALE) -3)
             
             elif self.ramp_item.snapped_edge == "Left":
-                left26 = ((self.deck_width * SCALE) -3) # width - 3 inches offset to mm
-                right26 = (self.deck_width * SCALE)
-                top26 = ((self.deck_length * SCALE) -3)
-                bottom26 =((self.deck_length * SCALE) -3)
+                self.left26 = ((self.deck_width * SCALE) -3) # width - 3 inches offset to mm
+                self.right26 = (self.deck_width * SCALE)
+                self.top26 = ((self.deck_length * SCALE) -3)
+                self.bottom26 =((self.deck_length * SCALE) -3)
                 
             elif self.ramp_item.snapped_edge == "top":
-                top26 = ((self.deck_length * SCALE) -3)# width - 3 inches offset to mm
+                self.top26 = ((self.deck_length * SCALE) -3)# width - 3 inches offset to mm
                 
                 
                 
             elif self.ramp_item.snapped_edge == "bottom":
-                top26 = ((self.deck_length * SCALE) -3)# width - 3 inches offset to mm    
-        
-
+                self.top26 = ((self.deck_length * SCALE) -3)# width - 3 inches offset to mm
+        else:
+            print("NO RAMP")
+            ############
             
-        
         print(f"""
         
-        ________{top26}_______
+        ________{self.top26}_______
         |                    |
         |                    |
-        {left26}             {right26}
+        {self.left26}             {self.right26}
         |                    |
         |                    |
-        --------{bottom26}----
+        --------{self.bottom26}----
         
         """)    
         
@@ -875,22 +835,22 @@ class DeckDesignerWindow(QtGui.QDialog):
         BRP=self.make_post(doc,asm,"BRP")
         #main boards
         right26_obj = doc.addObject("Part::Box", "right26")
-        right26_obj.Length = (right26 * 25.4)
+        right26_obj.Length = (self.right26 * 25.4)
         right26_obj.Width = (1.5*25.4)
         right26_obj.Height = (5.5*25.4)
         asm.addObject(right26_obj) 
         left26_obj = doc.addObject("Part::Box", "left26")
-        left26_obj.Length = (left26 * 25.4)
+        left26_obj.Length = (self.left26 * 25.4)
         left26_obj.Width = (1.5*25.4)
         left26_obj.Height = (5.5*25.4)
         asm.addObject(left26_obj) 
         top26_obj = doc.addObject("Part::Box", "top26")
-        top26_obj.Length = (top26 * 25.4)
+        top26_obj.Length = (self.top26 * 25.4)
         top26_obj.Width = (1.5*25.4)
         top26_obj.Height = (5.5*25.4)
         asm.addObject(top26_obj) 
         bottom26_obj = doc.addObject("Part::Box", "bottom26")
-        bottom26_obj.Length = (bottom26 * 25.4)
+        bottom26_obj.Length = (self.bottom26 * 25.4)
         bottom26_obj.Width = (1.5*25.4)
         bottom26_obj.Height = (5.5*25.4)
         asm.addObject(bottom26_obj) 
@@ -905,46 +865,25 @@ class DeckDesignerWindow(QtGui.QDialog):
             if self.ramp_item.snapped_edge == "Right":
                 # frame
                 self.ground_joint(asm,doc,left26_obj)
-                self.make_joint(asm,doc,'top26.Face2','left26.Face4',0,(left26/2)-.75,0)
-                self.make_joint(asm,doc,'bottom26.Face2','left26.Face4',0,-(left26/2)+.75,0)
-                self.make_joint(asm,doc,'right26.Face3','left26.Face4',0,0,top26-5)
-                
-                if joists_direct in "length":
-                    base="top26.Face3"
-                    base1="bottom26.Face4"
-                else:
-                    base="right26.Face3"
-                    base1="left26.Face4"
-                # jiost
-                print(f"{joists_direct}")
-                for i in range(num_of_joists):
-                    joist = doc.addObject("Part::Box", f"joist_{i}")
-                    joist.Length = (joists_length)
-                    joist.Width = (1.5*25.4)
-                    joist.Height = (5.5*25.4)
-                    asm.addObject(joist) 
-
-                    self.make_joint(asm,doc,f'joist_{i}.Face1',base,0,((spacing_joists*(i+1))-((right26/2)-.75)),0)
-                    for _ in range(30):
-                        QtCore.QCoreApplication.processEvents()
-                        time.sleep(0.02)
-                    doc.recompute()
+                self.make_joint(asm,doc,'top26.Face2','left26.Face4',0,(self.left26/2)-.75,0)
+                self.make_joint(asm,doc,'bottom26.Face2','left26.Face4',0,-(self.left26/2)+.75,0)
+                self.make_joint(asm,doc,'right26.Face3','left26.Face4',0,0,self.top26-5)
                 
                 print("posts")
                 # posts
-                self.make_joint(asm,doc,'TLP.Face2','top26.Face3',40.5/2-2.75,(top26/2)-1.75,0,0,0,90)
+                self.make_joint(asm,doc,'TLP.Face2','top26.Face3',40.5/2-2.75,(self.top26/2)-1.75,0,0,0,90)
                 for _ in range(30):
                         QtCore.QCoreApplication.processEvents()
                         time.sleep(0.02)
-                self.make_joint(asm,doc,'TRP.Face2','top26.Face3',40.5/2-2.75,-(top26/2)+1.75,0,0,0,90)
+                self.make_joint(asm,doc,'TRP.Face2','top26.Face3',40.5/2-2.75,-(self.top26/2)+1.75,0,0,0,90)
                 for _ in range(30):
                         QtCore.QCoreApplication.processEvents()
                         time.sleep(0.02)
-                self.make_joint(asm,doc,'BLP.Face4','bottom26.Face4',40.5/2-2.75,(bottom26/2)-1.75,0,0,0,90)
+                self.make_joint(asm,doc,'BLP.Face4','bottom26.Face4',40.5/2-2.75,(self.bottom26/2)-1.75,0,0,0,90)
                 for _ in range(30):
                         QtCore.QCoreApplication.processEvents()
                         time.sleep(0.02)
-                self.make_joint(asm,doc,'BRP.Face4','bottom26.Face4',40.5/2-2.75,-(bottom26/2)+1.75,0,0,0,90)
+                self.make_joint(asm,doc,'BRP.Face4','bottom26.Face4',40.5/2-2.75,-(self.bottom26/2)+1.75,0,0,0,90)
                 for _ in range(30):
                         QtCore.QCoreApplication.processEvents()
                         time.sleep(0.02)
@@ -959,12 +898,13 @@ class DeckDesignerWindow(QtGui.QDialog):
                     elif self.ramp_item.snapped_corner == "Right-bottom":
                         append_row(sheet,"Ramp_post_2")
                         TLP=self.make_post(doc,asm,"Ramp_post_2")
-                        self.make_joint(asm,doc,'Ramp_post_2.Face2','right26.Face4',40.5/2-2.75,-(right26/2)+1.75,0,0,0,90)	
-                        
-                        
+                        self.make_joint(asm,doc,'Ramp_post_2.Face2','right26.Face4',40.5/2-2.75,-(self.right26/2)+1.75,0,0,0,90)	
+                else:
+                    # place ramp create new post?
+                    print("ramp post nerw")
                 
+                # Stair for loop same thing
                 
-                    
                 
             
             # el if
@@ -972,18 +912,18 @@ class DeckDesignerWindow(QtGui.QDialog):
             #  if el
                 print(f" RAMP LOG: {self.ramp_item.name} | Edge: {self.ramp_item.snapped_edge} | Offset: {self.ramp_item.offset_value} in from {self.ramp_item.snapped_corner}")
             elif self.ramp_item.snapped_edge == "Left":
-                left26 = ((self.deck_width * SCALE) -3) # width - 3 inches offset to mm
-                right26 = (self.deck_width * SCALE)
-                top26 = ((self.deck_width * SCALE) -3)
-                bottom26 =((self.deck_width * SCALE) -3)
+                self.left26 = ((self.deck_width * SCALE) -3) # width - 3 inches offset to mm
+                self.right26 = (self.deck_width * SCALE)
+                self.top26 = ((self.deck_width * SCALE) -3)
+                self.bottom26 =((self.deck_width * SCALE) -3)
                 
             elif self.ramp_item.snapped_edge == "Top":
-                top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm
+                self.top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm
                 
                 
                 
             elif self.ramp_item.snapped_edge == "Bottom":
-                top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm    
+                self.top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm    
         
 
             
@@ -992,50 +932,120 @@ class DeckDesignerWindow(QtGui.QDialog):
         # normal
         else:
             print("NORMAL")
-        
-        """
-        support_width=False
-        support_length=False
-        
-        support_extra=False
-        shared_beam_post=None
-        
-        
-        beam_die=None
-        # extra
-        if (self.deck_width * SCALE) > 96:
-            support_width=True  
-        if (self.deck_length * SCALE) > 96:
-            support_length=True
+        # joists   
+        if (self.deck_width == self.deck_length) or (self.deck_width > self.deck_length):
+            joists_direct="width"
+            num_of_joists=((self.deck_width * SCALE)//24)
             
-        if (support_width):
-            beam_die="Length"
-        if (support_length) :
-            beam_die="width"
+            if (self.deck_width * SCALE) % 24:
+                num_of_joists=((self.deck_length * SCALE) / 24) -1
+            else:
+                num_of_joists=((self.deck_length * SCALE)//24)
+
+            spacing_joists=((self.deck_length * SCALE)-3) / (num_of_joists + 1) ############### -3 might be wrong \_('>')_/
+        else:
+            joists_direct="length"
+            if (self.deck_width * SCALE) % 24:
+                num_of_joists=((self.deck_width * SCALE) / 24) -1
+            else:
+                num_of_joists=((self.deck_width * SCALE)//24)
+            spacing_joists=((self.deck_width * SCALE)-3) / (num_of_joists + 1) ############### -3 might be wrong \_('>')_/
         
-        
-        if support_width:
+        ##
+        if (joists_direct == "length"):
             if self.ramp_item:
-                if self.ramp_item.snapped_edge in ["Top","Bottom"]:
-                    support_extra=True
+                if self.ramp_item.snapped_edge in ["Right","Left"]:
+                    joists_length=((self.deck_length * SCALE) -8) * 25.4 ############ might be crazy wrong
+                else:
+                   joists_length=((self.deck_length * SCALE) -3) * 25.4
+            else:
+                joists_length=((self.deck_length * SCALE) -3) * 25.4
+        else:
+            if self.ramp_item:
+               if self.ramp_item.snapped_edge in ["Top","Bottom"]:
+                    joists_length=((self.deck_width * SCALE) -8) * 25.4 ########
+               else:
+                   joists_length=((self.deck_width * SCALE) -3) * 25.4
+            else:
+                joists_length=((self.deck_width * SCALE) -3) * 25.4
+        print(f"joists_direct {joists_direct}   num_of_runners : {num_of_joists}  spacing_joists {spacing_joists} joists_length {joists_length}" )
+        
+
+        
+       
+        
+        
+        if joists_direct in "length":
+            board_length=self.right26 #######
+            base="right26.Face3"
+            #base1="left26.Face4"            
+        else:
+            board_length=self.top26
+            base="bottom26.Face4"
             
-            if support_extra = =True:
-                for i in self.stair_items:
-                    if i.snapped_edge in ["Top","Bottom"]:
-                        if self.ramp_item.snapped_edge != i.snapped_edge:
-                            if self.ramp_item.offset_value == i.offset_value:
-                                shared_beam_post=f"{i.Name}"
-                                support_extra=False
-                                
-            print(shared_beam_post)            
-        """            
+        for i in range(num_of_joists):
+            joist = doc.addObject("Part::Box", f"joist_{i}")
+            joist.Length = (joists_length)
+            joist.Width = (1.5*25.4)
+            joist.Height = (5.5*25.4)
+            asm.addObject(joist) 
+
+            self.make_joint(asm,doc,f'joist_{i}.Face1',base,0,((spacing_joists*(i+1))-((board_length/2)-.75)),0)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+        doc.recompute()
+        
+        # Beam!!
+        if ((self.deck_width * SCALE) > 96 or (self.deck_length * SCALE) > 96):
+            point_list=[]
+            sideswithfun={}
+            beam_direct=None
+            if (self.ramp_item):   
+                sideswithfun["ramp"] = self.ramp_item.snapped_edge
+            for i in self.stair_items:
+                sideswithfun["stair"] = (i.snapped_edge)
+            print(sideswithfun)
+            #Tflipflop
+            if joists_direct == "length":
+                beam_direct="width"
+            else:
+                beam_direct="length"
+           
+            if beam_direct == "length":
+                print("BEAM length")  
+                if self.ramp_item.snapped_corner in "Top":
+                    print((self.right26/2)-self.ramp_item.offset_value)
+                    point_list.append((self.right26/2)-self.ramp_item.offset_value)
+                else:
+                    print(self.ramp_item.offset_value-(self.right26/2))
+                    point_list.append(self.ramp_item.offset_value-(self.right26/2))
+            else:
+                print("BEAM width")       
+                   
+                   
+                   
+                   
+                   
+
     def joint_ramp_deck(self,asm,doc,path):
         itemA=path
         if self.ramp_item.snapped_edge == "Right":
             itemB='Deck.right26.Face4'
+            board_length=self.right26
+        
         offsetX=0
-        offsetY=0
         offsetZ=0
+        if re.search(r"(?<=-)Top", self.ramp_item.snapped_corner):
+            # -24 for width of ramp
+            if(self.ramp_item.offset_value == 0):
+                offsetY=(board_length/2)-24-3.5
+            else:
+                offsetY=(self.ramp_item.offset_value-24)-board_length/2
+        else:
+            offsetY=board_length/2-(self.ramp_item.offset_value+24)
+            
+        
         
         rotZ=0
         rotY=180
@@ -1083,7 +1093,7 @@ class DeckDesignerWindow(QtGui.QDialog):
         joint_grp=find_joint_group(asm)
         new_joint = joint_grp.Group[-1]
         rot = App.Rotation(rotZ, rotY, rotX)
-        new_joint.Offset2 = App.Placement(App.Vector(offsetX* 25.4 , offsetY*25.4,offsetZ* 25.4), rot)
+        new_joint.Offset2 = App.Placement(App.Vector(offsetX* 25.4 , offsetY*25.4, offsetZ* 25.4), rot)
         Gui.Selection.clearSelection()
         
         
@@ -1204,11 +1214,10 @@ class DraggableItem(QtGui.QGraphicsRectItem):
         label.setPos(item_rect.width()/2 - lb.width()/2, item_rect.height()/2 - lb.height()/2)
 
 class StairsItem(DraggableItem):
-    # --- PATH FIX: Accept macro_dir and build full path ---
     def __init__(self, scale, index=1, deck_item=None, macro_dir="", parent=None):
         full_texture_path = os.path.join(macro_dir, "Stair_T.png")
         super(StairsItem, self).__init__(
-            QtCore.QRectF(0, 0, 36, 36),
+            QtCore.QRectF(0, 0, 41, 41),
             QtGui.QColor(255, 150, 50, 200),
             f"STAIRS {index}",
             deck_item=deck_item,
@@ -1217,7 +1226,6 @@ class StairsItem(DraggableItem):
         )
         
 class RampItem(DraggableItem):
-    # --- PATH FIX: Accept macro_dir and build full path ---
     def __init__(self,scale, deck_item=None, macro_dir="", parent=None):
             full_texture_path = os.path.join(macro_dir, "Ramp_T.png")
             super(RampItem, self).__init__(
@@ -1230,7 +1238,6 @@ class RampItem(DraggableItem):
             )
     
 class ramp_class():
-    
     def __init__(self,main_file,desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
         print(567)
         self.desc=desc
@@ -1243,7 +1250,6 @@ class ramp_class():
         self.partlist=self.ramp_main(main_file,desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number)
         
     def ramp_main(self,main_file,desc,ending_flat,Drop_Slope,Drop_Angle,client,site_number):
-            print(21)
             parts_to_import= {}
             parced_desc=desc.split(",")
             feet_of_ramp=0

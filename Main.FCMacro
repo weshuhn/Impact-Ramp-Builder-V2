@@ -133,9 +133,7 @@ class Box:
         
         else:
             print("we got a directial problem YAY")
-        
         if (self.heading == 0 or self.heading == 180):
-            
             # top of box along X
             # given on corner
             X_offset=1.75
@@ -173,9 +171,6 @@ class Box:
 class MainForm(QtGui.QWidget):
     def __init__(self):
         super(MainForm, self).__init__()
-        
-        # --- PATH FIX: Find the macro's own directory ---
-        # __file__ is the path of the currently running script
         self.macro_dir = os.path.dirname(__file__) 
         json_path = os.path.join(self.macro_dir, 'Lumber_Prices.json')
         # --- END FIX ---
@@ -239,29 +234,34 @@ class MainForm(QtGui.QWidget):
         self.Stair_input.setValidator(QtGui.QIntValidator(0, 4, parent=self))
         form_grid.addWidget(self.Stair_Label, 7, 0)
         form_grid.addWidget(self.Stair_input, 7, 1)
+        self.Deck_Height = QtGui.QLabel("Height from bottom of deck (In):")
+        self.Deck_Height = QtGui.QLineEdit()
+        self.Deck_Height.setValidator(QtGui.QIntValidator(0, 9999, parent=self))
+        form_grid.addWidget(self.Deck_Height, 8, 0)
+        form_grid.addWidget(self.Deck_Height, 8, 1)
         self.heading_label = QtGui.QLabel("<h1>Ramp Info</h1>")
-        form_grid.addWidget(self.heading_label, 8, 0)
+        form_grid.addWidget(self.heading_label, 9, 0)
         self.ramp_desc_label = QtGui.QLabel("Ramp :")
         self.ramp_desc_input = QtGui.QLineEdit()
         self.ramp_desc_input.setMinimumSize(250,40)
-        form_grid.addWidget(self.ramp_desc_label, 9, 0)
-        form_grid.addWidget(self.ramp_desc_input, 9, 1)
+        form_grid.addWidget(self.ramp_desc_label, 10, 0)
+        form_grid.addWidget(self.ramp_desc_input, 10, 1)
         self.flat_label = QtGui.QLabel("Ending flat? :")
         self.flat_input = QtGui.QCheckBox()
-        form_grid.addWidget(self.flat_label, 10, 0)
-        form_grid.addWidget(self.flat_input, 10, 1)
+        form_grid.addWidget(self.flat_label, 11, 0)
+        form_grid.addWidget(self.flat_input, 11, 1)
         self.heading_label = QtGui.QLabel("<h3>Slope:</h3>")
-        form_grid.addWidget(self.heading_label, 11, 0)
+        form_grid.addWidget(self.heading_label, 12, 0)
         self.drop_label = QtGui.QLabel("Drop (Inches) :")
         self.drop_input = QtGui.QLineEdit()
         self.drop_input.setValidator(QtGui.QIntValidator(0, 10, parent=self))
-        form_grid.addWidget(self.drop_label, 12, 0)
-        form_grid.addWidget(self.drop_input, 12, 1)
+        form_grid.addWidget(self.drop_label, 13, 0)
+        form_grid.addWidget(self.drop_input, 13, 1)
         self.degree_label = QtGui.QLabel("Degree (Angle) :")
         self.degree_input = QtGui.QLineEdit()
         self.degree_input.setValidator(QtGui.QIntValidator(0, 10, parent=self))
-        form_grid.addWidget(self.degree_label, 13, 0)
-        form_grid.addWidget(self.degree_input, 13, 1)
+        form_grid.addWidget(self.degree_label, 14, 0)
+        form_grid.addWidget(self.degree_input, 14, 1)
         self.heading_label = QtGui.QLabel("<h1>Gen Info</h1>")
         form_grid.addWidget(self.heading_label, 14, 0)
         self.point_label = QtGui.QLabel("Point Cloud Post Set (optional):")
@@ -326,6 +326,7 @@ class MainForm(QtGui.QWidget):
         Deck_Length = self.length_input.text()
         Deck_Width = self.width_input.text()
         Stair_Number = self.Stair_input.text()
+        Deck_Height = self.Deck_Height.text()
         Ramp_Desc = self.ramp_desc_input.text()
         Flat_Check = self.flat_input.isChecked()
         Drop_Slope = self.drop_input.text()
@@ -339,6 +340,7 @@ class MainForm(QtGui.QWidget):
             deck=True
             if not Deck_Length: errors.append("Deck Length is required.")
             if not Deck_Width: errors.append("Deck Width is required.")
+            if not Deck_Height: errors.append("Deck Height is required.")
             if not Stair_Number: errors.append("Number of Stairs is required.")
         if Ramp_Desc != "" or Drop_Slope != "" or Drop_Angle != "":
             ramp=True
@@ -370,8 +372,9 @@ class MainForm(QtGui.QWidget):
             Deck_Length = int(Deck_Length)
             Deck_Width = int(Deck_Width)
             Stair_Number = int(Stair_Number)
+            Deck_Height = int(Deck_Height)
             self.deck_designer_window = DeckDesignerWindow(
-                main_file,Deck_Length, Deck_Width, Stair_Number, Inches_Deck,ramp, 
+                main_file,Deck_Length, Deck_Width, Stair_Number, Inches_Deck,ramp,Deck_Height, 
                 self.macro_dir, 
                 parent=self
             )
@@ -430,7 +433,7 @@ class MainForm(QtGui.QWidget):
 
 # deck break out
 class DeckDesignerWindow(QtGui.QDialog):
-    def __init__(self, main_file, deck_length, deck_width, stair_count, inch, ramp, macro_dir, parent=None): # <-- FIX: Added macro_dir
+    def __init__(self, main_file, deck_length, deck_width, stair_count, inch, ramp,Deck_Height , macro_dir, parent=None): # <-- FIX: Added macro_dir
         super(DeckDesignerWindow, self).__init__(parent)
         self.setWindowTitle(f"Deck Designer - {deck_length} x {deck_width}")
         self.setGeometry(200, 200, 1000, 800)
@@ -440,8 +443,9 @@ class DeckDesignerWindow(QtGui.QDialog):
         self.inch_unit=inch
         self.deck_length = deck_length
         self.deck_width = deck_width
+        self.deck_height = Deck_Height
         self.stair_count = stair_count
-        self.macro_dir = macro_dir # <-- FIX: Save the path
+        self.macro_dir = macro_dir 
         self.ramp = ramp
         
         self.ramp_item = None
@@ -888,23 +892,44 @@ class DeckDesignerWindow(QtGui.QDialog):
                         QtCore.QCoreApplication.processEvents()
                         time.sleep(0.02)
                 
+                #
+                # DEeleaet
+                #
+                """
                 if self.ramp_item.offset_value == 0:
                     if self.ramp_item.snapped_corner == "Right-Top":
                         append_row(sheet,"Ramp_post_2")
-                        TLP=self.make_post(doc,asm,"Ramp_post_2")
-                        time.sleep(12)
+                        self.make_post(doc,asm,"Ramp_post_2")
                         self.make_joint(asm,doc,'Ramp_post_2.Face2','TRP.Face4',0,0,-48,0,0,0)
                         
-                    elif self.ramp_item.snapped_corner == "Right-bottom":
+                    elif self.ramp_item.snapped_corner == "Right-Bottom":
                         append_row(sheet,"Ramp_post_2")
-                        TLP=self.make_post(doc,asm,"Ramp_post_2")
-                        self.make_joint(asm,doc,'Ramp_post_2.Face2','right26.Face4',40.5/2-2.75,-(self.right26/2)+1.75,0,0,0,90)	
+                        self.make_post(doc,asm,"Ramp_post_2")
+                        self.make_joint(asm,doc,'Ramp_post_2.Face4','BRP.Face2',0,0,-48,0,0)	
                 else:
+                    if self.ramp_item.snapped_corner == "Right-Top":
+                        append_row(sheet,"Ramp_post_1")
+                        self.make_post(doc,asm,"Ramp_post_1")
+                        self.make_joint(asm,doc,'Ramp_post_1.Face2','TRP.Face4',0,0,-self.ramp_item.offset_value,0,0,0)
+                        
+                        append_row(sheet,"Ramp_post_2")
+                        self.make_post(doc,asm,"Ramp_post_2")
+                        self.make_joint(asm,doc,'Ramp_post_2.Face4','TRP.Face4',0,0,-self.ramp_item.offset_value+48,0,0)	
+                        
+                    elif self.ramp_item.snapped_corner == "Right-Bottom":
+                        append_row(sheet,"Ramp_post_1")
+                        self.make_post(doc,asm,"Ramp_post_1")
+                        self.make_joint(asm,doc,'Ramp_post_1.Face4','BRP.Face2',0,0,-self.ramp_item.offset_value,0,0)
+                        
+                        append_row(sheet,"Ramp_post_2")
+                        self.make_post(doc,asm,"Ramp_post_2")
+                        self.make_joint(asm,doc,'Ramp_post_2.Face4','BRP.Face2',0,0,-self.ramp_item.offset_value+48,0,0)	
+                        
                     # place ramp create new post?
-                    print("ramp post nerw")
+                    
                 
                 # Stair for loop same thing
-                
+                """
                 
             
             # el if
@@ -924,6 +949,92 @@ class DeckDesignerWindow(QtGui.QDialog):
                 
             elif self.ramp_item.snapped_edge == "Bottom":
                 self.top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm    
+            
+            
+                    #matching?? share
+            point_list={}
+            # equizer
+            edge=None
+            if self.ramp_item.snapped_edge == "Right":
+                edge=self.right26
+                post="TRP.Face4"
+            elif self.ramp_item.snapped_edge == "Left":
+                edge=self.left26
+            elif self.ramp_item.snapped_edge == "Top":
+                edge=self.Top26
+            elif self.ramp_item.snapped_edge == "Bottom":
+                edge=self.bottom26
+            else:
+                print("AAHHHHh")
+        
+            if self.ramp_item.offset_value == 0:
+                if re.search(r"(?<=-)Top", self.ramp_item.snapped_corner):
+                    #point_list["RampA"]=-3.5
+                    point_list["RampB"]=[-48,self.ramp_item.snapped_edge]
+                else:
+                    #point_list["RampA"]=[-(edge-3.5)
+                    point_list["RampB"]=[-(edge-48),self.ramp_item.snapped_edge]
+            else:
+                if re.search(r"(?<=-)Top", self.ramp_item.snapped_corner):
+                    point_list["RampA"]=[-(self.ramp_item.offset_value),self.ramp_item.snapped_edge]
+                    point_list["RampB"]=[-(self.ramp_item.offset_value+51.5),self.ramp_item.snapped_edge]
+                else:
+                    point_list["RampA"]=[-(edge-self.ramp_item.offset_value),self.ramp_item.snapped_edge]
+                    point_list["RampB"]=[-(edge-self.ramp_item.offset_value-51.5),self.ramp_item.snapped_edge]
+            
+            for index,stair in enumerate(self.stair_items):
+                if stair.snapped_edge == "Right":
+                    edge=self.right26
+                    post="TRP.Face4"
+                elif stair.snapped_edge == "Left":
+                    edge=self.left26
+                elif stair.snapped_edge == "Top":
+                    edge=self.Top26
+                elif stair.snapped_edge == "Bottom":
+                    edge=self.bottom26
+                else:
+                    print("AAHHHHh")
+                
+                if stair.offset_value == 0:
+                    if re.search(r"(?<=-)Top", stair.snapped_corner):
+                        #point_list[f"Post_{index}_A"]=-3.5
+                        point_list[f"Post_{index}_B"]=[-41,stair.snapped_edge]
+                    else:
+                        #point_list[f"Post_{index}_A"]=-(edge-3.5)
+                        point_list[f"Post_{index}_B"]=[-(edge-51.5),stair.snapped_edge]
+                else:
+                    if re.search(r"(?<=-)Top", stair.snapped_corner):
+                        point_list[f"Post_{index}_A"]=[-stair.offset_value,stair.snapped_edge]
+                        point_list[f"Post_{index}_B"]=[-(stair.offset_value+41),stair.snapped_edge]
+                    else:
+                        point_list[f"Post_{index}_A"]=[-(edge-stair.offset_value),stair.snapped_edge]
+                        point_list[f"Post_{index}_B"]=[-(edge-stair.offset_value),stair.snapped_edge]
+                
+            print(point_list)
+            
+            right_posts={}
+            left_posts={}
+            top_posts={}
+            bottom_posts={}
+            for name, (val, side) in point_list.items(): 
+                if side == "Right":
+                    if val not in right_posts.values():
+                        right_posts[name]=val
+                        print(77)
+                        append_row(sheet,name)
+                        self.make_post(doc,asm,name)
+                        self.make_joint(asm,doc,f'{name}.Face2','TRP.Face4',0,0,val,0,0,0)
+                        print(723)
+                if side == "Left":
+                    if val not in left_posts.values():
+                        left_posts[name]=val
+                if side == "Top":
+                    if val not in top_posts.values():
+                        top_posts[name]=val
+                if side == "Bottom":
+                    if val not in top_posts.values():
+                        top_posts[name]=val
+
         
 
             
@@ -970,9 +1081,9 @@ class DeckDesignerWindow(QtGui.QDialog):
                 joists_length=((self.deck_width * SCALE) -3) * 25.4
         print(f"joists_direct {joists_direct}   num_of_runners : {num_of_joists}  spacing_joists {spacing_joists} joists_length {joists_length}" )
         
+        
 
         
-       
         
         
         if joists_direct in "length":
@@ -995,7 +1106,7 @@ class DeckDesignerWindow(QtGui.QDialog):
                 QtCore.QCoreApplication.processEvents()
                 time.sleep(0.02)
         doc.recompute()
-        
+        """
         # Beam!!
         if ((self.deck_width * SCALE) > 96 or (self.deck_length * SCALE) > 96):
             point_list=[]
@@ -1022,7 +1133,7 @@ class DeckDesignerWindow(QtGui.QDialog):
                     point_list.append(self.ramp_item.offset_value-(self.right26/2))
             else:
                 print("BEAM width")       
-                   
+        """
                    
                    
                    
@@ -1036,16 +1147,18 @@ class DeckDesignerWindow(QtGui.QDialog):
         
         offsetX=0
         offsetZ=0
+        offsetY=0
         if re.search(r"(?<=-)Top", self.ramp_item.snapped_corner):
             # -24 for width of ramp
             if(self.ramp_item.offset_value == 0):
                 offsetY=(board_length/2)-24-3.5
             else:
-                offsetY=(self.ramp_item.offset_value-24)-board_length/2
+                offsetY=((board_length-14)/2)-(self.ramp_item.offset_value+24)
         else:
-            offsetY=board_length/2-(self.ramp_item.offset_value+24)
-            
-        
+            if (self.ramp_item.offset_value == 0):
+                offsetY-=board_length/2-24-3.5
+            else:
+                offsetY-=((board_length-14)/2)-(self.ramp_item.offset_value+24)
         
         rotZ=0
         rotY=180

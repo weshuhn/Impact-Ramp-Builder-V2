@@ -1,4 +1,4 @@
-# FreeCAD and PySide Imports
+ # FreeCAD and PySide Imports
 import FreeCAD
 import FreeCADGui
 import Assembly
@@ -15,7 +15,6 @@ import os
 import re
 import math
 from PySide import QtCore, QtGui
-
 
 import Preferences
 prefs = Preferences.preferences()
@@ -234,10 +233,10 @@ class MainForm(QtGui.QWidget):
         self.Stair_input.setValidator(QtGui.QIntValidator(0, 4, parent=self))
         form_grid.addWidget(self.Stair_Label, 7, 0)
         form_grid.addWidget(self.Stair_input, 7, 1)
-        self.Deck_Height = QtGui.QLabel("Height from bottom of deck (In):")
+        self.Deck_Height_Label = QtGui.QLabel("Height from top of deck (-6.5in):")
         self.Deck_Height = QtGui.QLineEdit()
         self.Deck_Height.setValidator(QtGui.QIntValidator(0, 9999, parent=self))
-        form_grid.addWidget(self.Deck_Height, 8, 0)
+        form_grid.addWidget(self.Deck_Height_Label, 8, 0)
         form_grid.addWidget(self.Deck_Height, 8, 1)
         self.heading_label = QtGui.QLabel("<h1>Ramp Info</h1>")
         form_grid.addWidget(self.heading_label, 9, 0)
@@ -263,19 +262,19 @@ class MainForm(QtGui.QWidget):
         form_grid.addWidget(self.degree_label, 14, 0)
         form_grid.addWidget(self.degree_input, 14, 1)
         self.heading_label = QtGui.QLabel("<h1>Gen Info</h1>")
-        form_grid.addWidget(self.heading_label, 14, 0)
+        form_grid.addWidget(self.heading_label, 15, 0)
         self.point_label = QtGui.QLabel("Point Cloud Post Set (optional):")
         self.point_display = QtGui.QLineEdit()
         self.point_pick = QtGui.QPushButton("Browse...")
         self.point_display.setReadOnly(True)
-        form_grid.addWidget(self.point_label, 15, 0)
-        form_grid.addWidget(self.point_display, 15, 1)
-        form_grid.addWidget(self.point_pick, 15, 2)
+        form_grid.addWidget(self.point_label, 16, 0)
+        form_grid.addWidget(self.point_display, 16, 1)
+        form_grid.addWidget(self.point_pick, 16, 2)
         self.point_pick.clicked.connect(self.open_file_dialog)
         self.post_label = QtGui.QLabel("Normal Post Set:")
         self.post_input = QtGui.QCheckBox()
-        form_grid.addWidget(self.post_label, 16, 0)
-        form_grid.addWidget(self.post_input, 16, 1)
+        form_grid.addWidget(self.post_label, 17, 0)
+        form_grid.addWidget(self.post_input, 17, 1)
         self.submit_button = QtGui.QPushButton("Submit Data")
         self.submit_button.clicked.connect(self.submit_form)
         form_container_layout.addLayout(form_grid)
@@ -443,7 +442,7 @@ class DeckDesignerWindow(QtGui.QDialog):
         self.inch_unit=inch
         self.deck_length = deck_length
         self.deck_width = deck_width
-        self.deck_height = Deck_Height
+        self.deck_height = (Deck_Height-6.5)
         self.stair_count = stair_count
         self.macro_dir = macro_dir 
         self.ramp = ramp
@@ -451,7 +450,9 @@ class DeckDesignerWindow(QtGui.QDialog):
         self.ramp_item = None
         self.stair_items = []
         self.house_label_item = None  
-        self.deck_rect = None       
+        self.deck_rect = None     
+        
+        self.house_label_value = None
 
         #self.central_widget = QtGui.QWidget()
         #self.setCentralWidget(self.central_widget)
@@ -534,17 +535,21 @@ class DeckDesignerWindow(QtGui.QDialog):
 
         # 4. Position Logic
         if side == "Top":
+            self.house_label_value="Top"
             x = deck_rect.left() + (deck_rect.width() - label_bounds.width()) / 2
             y = deck_rect.top() - label_bounds.height() - margin
         elif side == "Bottom":
+            self.house_label_value="Bottom"
             x = deck_rect.left() + (deck_rect.width() - label_bounds.width()) / 2
             y = deck_rect.bottom() + margin
         elif side == "Left":
+            self.house_label_value="Left"
             label.setRotation(-90)
             # Center vertically, place to the left of the deck edge
             x = deck_rect.left() - label_bounds.width() - margin
             y = deck_rect.top() + (deck_rect.height() - label_bounds.height()) / 2
         elif side == "Right":
+            self.house_label_value="Right"
             label.setRotation(90)
             # Center vertically, place to the right of the deck edge
             x = deck_rect.right() + margin
@@ -561,32 +566,10 @@ class DeckDesignerWindow(QtGui.QDialog):
         """Clears the scene and draws the main deck rectangle with textures and labels."""
         self.scene.clear()
         
-        # 1. Determine Scale (Inches vs Feet)
-        # If inch_unit is True, we treat units as 1:1. If False (Feet), we scale by 12.
         SCALE = 1 if self.inch_unit else 12
         
         visual_length = self.deck_length * SCALE
         visual_width = self.deck_width * SCALE
-        
-        # 2. Setup Texture/Brush
-        try:
-            texture_path = os.path.join(self.macro_dir, "Decking.png")
-            texture_pixmap = QtGui.QPixmap(texture_path)
-            
-            if texture_pixmap.isNull():
-                # Fallback to a professional "blueprint" blue if image is missing
-                deck_brush = QtGui.QBrush(QtGui.QColor(100, 150, 200, 150))
-            else:
-                # Tile the texture or scale it to fit the deck area
-                scaled_pixmap = texture_pixmap.scaled(
-                    visual_length, visual_width,
-                    QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.SmoothTransformation
-                )
-                deck_brush = QtGui.QBrush(scaled_pixmap)
-                
-        except Exception as e:
-            print(f"Error loading texture: {e}. Falling back to solid color.")
-            deck_brush = QtGui.QBrush(QtGui.QColor(200, 200, 200))
 
         # 3. Create the Deck Rectangle
         self.deck_rect = QtGui.QGraphicsRectItem(0, 0, visual_length, visual_width)
@@ -638,6 +621,17 @@ class DeckDesignerWindow(QtGui.QDialog):
 	        ramp.setPos(ramp_x_pos, 0)
 	        self.scene.addItem(ramp)
 	        self.ramp_item = ramp
+    def append_row(self,sheet_obj, name):
+        #Finds the first empty row in column A and writes the data_list across that row.
+        row = 1
+        # Find the first row where Column A is empty
+        while sheet_obj.getContents(f"A{row}"):
+            row += 1
+        sheet_obj.set(f"A{row}", name)
+        sheet_obj.set(f"B{row}", f"{self.deck_height*25.4}")
+        sheet_obj.setAlias(f"B{row}", f"Post_{name}")
+    
+    #App.activeDocument().recompute()   
     # in the corret assm
     def make_post(self,doc,asm,name):
         body = doc.addObject('PartDesign::Body', f"{name}")
@@ -677,7 +671,7 @@ class DeckDesignerWindow(QtGui.QDialog):
         
         if App.GuiUp:
             Gui.activateWorkbench("AssemblyWorkbench")
-        # Puts the assembly into 'edit' context so it can receive constraints
+            # Puts the assembly into 'edit' context so it can receive constraints
             Gui.ActiveDocument.setEdit(asm)
 
         Gui.Selection.clearSelection()
@@ -757,32 +751,189 @@ class DeckDesignerWindow(QtGui.QDialog):
         rot = App.Rotation(rotZ, rotY, rotX)
         new_joint.Offset2 = App.Placement(App.Vector(offsetX* 25.4 , offsetY*25.4,offsetZ* 25.4), rot)
         Gui.Selection.clearSelection()
-        
-        
     
+    def make_joint_post(self,asm,doc,itemA,itemB,offsetX,offsetY,offsetZ,rotX=0, rotY=0, rotZ=0):
+        Gui.Selection.clearSelection()
+        Gui.Selection.addSelection(doc.Name,'Deck',itemA)
+        Gui.Selection.addSelection(doc.Name,'Deck',itemB)
+        QtCore.QCoreApplication.processEvents()
+        time.sleep(0.1)
+        try:
+        # 2. Trigger the command
+            Gui.runCommand('Assembly_CreateJointDistance')
+        # 3. Wait for the Task Panel to be registered
+        # We use a short loop to ensure the GUI is ready
+            while Gui.Control.activeDialog():
+            # Crucial: This allows the GUI to remain responsive to your clicks
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.05)
+                mw = Gui.getMainWindow()
+        # Send 'Enter' key event to the main window/active focus
+                buttons = mw.findChildren(QtGui.QPushButton)
+                for btn in buttons:                
+                    if btn.text() == "OK":
+                        print("click")
+                        btn.animateClick()
+                        btn.click()
+                        
+                        found_button = True
+                        break
+
+        except Exception as e:
+            print(f"Error at Joint {i}: {str(e)}")
+            if Gui.Control.activeDialog():
+                Gui.Control.closeDialog() # 'False' acts as Cancel/Reject
+        
+        for _ in range(10):
+            QtCore.QCoreApplication.processEvents()
+            time.sleep(0.02)
+
+        joint_grp=find_joint_group(asm)
+        new_joint = joint_grp.Group[-1]
+        rot = App.Rotation(rotZ, rotY, rotX)
+        new_joint.Offset2 = App.Placement(App.Vector(offsetX* 25.4 , offsetY*25.4,offsetZ* 25.4), rot)
+        new_joint.Distance = -40.5 *25.4
+        Gui.Selection.clearSelection()
+    def make_2x4(self, doc, asm, name, length_inches):
+        print("working")
+        body = doc.addObject('PartDesign::Body', f"{name}")
+        asm.addObject(body)
+        sketch = doc.addObject('Sketcher::SketchObject', f'Sketch_{name}')
+        body.addObject(sketch)
+    
+        # Standard 2x4 actual dimensions in mm
+        width = 3.5 * 25.4  
+        thickness = 1.5 * 25.4
+        length = length_inches * 25.4
+    
+        # Create the rectangular geometry
+        lines = [
+            Part.LineSegment(App.Vector(0, 0, 0), App.Vector(width, 0, 0)),
+            Part.LineSegment(App.Vector(width, 0, 0), App.Vector(width, thickness, 0)),
+            Part.LineSegment(App.Vector(width, thickness, 0), App.Vector(0, thickness, 0)),
+            Part.LineSegment(App.Vector(0, thickness, 0), App.Vector(0, 0, 0))
+        ]
+        print("mpt wprfs")
+    
+        for line in lines:
+            sketch.addGeometry(line, False)
+        
+        # Constraints to close the loop
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 0, 2, 1, 1))
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 1, 2, 2, 1))
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 2, 2, 3, 1))
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 3, 2, 0, 1))
+        print("WORKIGNNG")
+        # Alignment constraints
+        sketch.addConstraint(Sketcher.Constraint('Horizontal', 0))
+        sketch.addConstraint(Sketcher.Constraint('Vertical', 1))
+    
+        # Dimensional constraints (Width x Thickness)
+        sketch.addConstraint(Sketcher.Constraint('DistanceX', 0, 1, 0, 2, width))
+        sketch.addConstraint(Sketcher.Constraint('DistanceY', 1, 1, 1, 2, thickness))
+        doc.recompute()
+    
+        # Create the Pad (the extrusion)
+        pad = doc.addObject('PartDesign::Pad', f'Pad_{name}')
+        pad.Profile = sketch
+        body.addObject(pad)
+        pad.Length = length
+    
+        doc.recompute()
+        return body.Name
+        
+    def make_deckboard(self, doc, asm, name, length_inch, left_45, right_45):
+        print(f"Creating Deckboard: {name}")
+        body = doc.addObject('PartDesign::Body', f"Body_{name}")
+        asm.addObject(body)
+        
+        sketch = doc.addObject('Sketcher::SketchObject', f'Sketch_{name}')
+        body.addObject(sketch)
+
+        # Actual dimensions (mm)
+        width = 5.5 * 25.4
+        thickness = 1.0 * 25.4
+        length = length_inch * 25.4
+        
+        # Back Edge (The Long Side) - This stays 144" exactly
+        p1 = App.Vector(0, 0, 0)
+        p2 = App.Vector(length, 0, 0)
+        if left_45:
+            p4 = App.Vector(width, width, 0)
+        else:
+            p4 = App.Vector(0, width, 0)
+
+        if right_45:
+            p3 = App.Vector(length - width, width, 0)
+        else:
+            p3 = App.Vector(length, width, 0)
+
+        # Create the closed profile
+        lines = [
+            Part.LineSegment(p1, p2),
+            Part.LineSegment(p2, p3),
+            Part.LineSegment(p3, p4),
+            Part.LineSegment(p4, p1)
+        ]
+        
+        for line in lines:
+            sketch.addGeometry(line, False)
+
+        # Geometric Constraints
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 0, 2, 1, 1))
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 1, 2, 2, 1))
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 2, 2, 3, 1))
+        sketch.addConstraint(Sketcher.Constraint('Coincident', 3, 2, 0, 1))
+        
+        # Keep the back edge horizontal
+        sketch.addConstraint(Sketcher.Constraint('Horizontal', 0))
+        
+        doc.recompute()
+
+        # Extrude the sketch UP by the board THICKNESS (1.0")
+        pad = doc.addObject('PartDesign::Pad', f'Pad_{name}')
+        pad.Profile = sketch
+        pad.Length = thickness
+        body.addObject(pad)
+        
+        doc.recompute()
+        fillet = doc.addObject('PartDesign::Fillet', f'Fillet_{name}')
+        body.addObject(fillet)
+        fillet_radius = 0.25 * 25.4
+
+        fillet.Base = (pad, ['Edge4', 'Edge10', 'Edge3',"Edge9"])
+        fillet.Radius = fillet_radius
+        doc.recompute()
+        return body.Name
+    
+    def handrail_create(self,doc,asm,length,name,left_corner ,right_corner):
+        print(f"2x4 length {length}")
+        top_n=self.make_2x4(doc, asm, f"{name}_Top", length)
+        bottom_n=self.make_2x4(doc, asm, f"{name}_Bottom", length)
+        top_deck=self.make_deckboard(doc, asm,f"{name}_TopDeck",length,left_corner,right_corner)
+        return top_deck,top_n,bottom_n
+        
     def build_in_freecad(self):
         SCALE = 1 if self.inch_unit else 12
-        
         self.right26=None
         self.left26=None
         self.top26=None
         self.bottom26=None
-        
-                #
+        #
         # ops length needs to be shorten 1.5inches
         if self.ramp_item:
             # ramp self.ramp_item.snapped_edge
             if self.ramp_item.snapped_edge == "Right":
                 self.right26 = ((self.deck_width * SCALE) -3)# width - 3 inches offset to mm
                 self.left26 = (self.deck_width * SCALE)
-                self.top26 = ((self.deck_length * SCALE) -3)
-                self.bottom26 = ((self.deck_length * SCALE) -3)
+                self.top26 = ((self.deck_length * SCALE) -1.5)
+                self.bottom26 = ((self.deck_length * SCALE) -1.5)
             
             elif self.ramp_item.snapped_edge == "Left":
                 self.left26 = ((self.deck_width * SCALE) -3) # width - 3 inches offset to mm
                 self.right26 = (self.deck_width * SCALE)
-                self.top26 = ((self.deck_length * SCALE) -3)
-                self.bottom26 =((self.deck_length * SCALE) -3)
+                self.top26 = ((self.deck_length * SCALE) -1.5)
+                self.bottom26 =((self.deck_length * SCALE) -1.52)
                 
             elif self.ramp_item.snapped_edge == "top":
                 self.top26 = ((self.deck_length * SCALE) -3)# width - 3 inches offset to mm
@@ -807,8 +958,6 @@ class DeckDesignerWindow(QtGui.QDialog):
         
         """)    
         
-        
-        
         doc = App.openDocument(self.main_file)
         try:
             import Assembly
@@ -829,13 +978,13 @@ class DeckDesignerWindow(QtGui.QDialog):
         sheet = doc.addObject("Spreadsheet::Sheet", "Posts_deck")
         asm.addObject(sheet) 
         # main posts
-        append_row(sheet,"TLP")
+        self.append_row(sheet,"TLP")
         TLP=self.make_post(doc,asm,"TLP")
-        append_row(sheet,"TRP")
+        self.append_row(sheet,"TRP")
         TRP=self.make_post(doc,asm,"TRP")
-        append_row(sheet,"BLP")
+        self.append_row(sheet,"BLP")
         BLP=self.make_post(doc,asm,"BLP")
-        append_row(sheet,"BRP")
+        self.append_row(sheet,"BRP")
         BRP=self.make_post(doc,asm,"BRP")
         #main boards
         right26_obj = doc.addObject("Part::Box", "right26")
@@ -875,72 +1024,57 @@ class DeckDesignerWindow(QtGui.QDialog):
                 
                 print("posts")
                 # posts
-                self.make_joint(asm,doc,'TLP.Face2','top26.Face3',40.5/2-2.75,(self.top26/2)-1.75,0,0,0,90)
+                self.make_joint_post(asm,doc,'TLP.Face6','top26.Face5',(self.top26/2)-1.75,-2.5,0,0,0)
                 for _ in range(30):
                         QtCore.QCoreApplication.processEvents()
                         time.sleep(0.02)
-                self.make_joint(asm,doc,'TRP.Face2','top26.Face3',40.5/2-2.75,-(self.top26/2)+1.75,0,0,0,90)
+                self.make_joint_post(asm,doc,'TRP.Face6','top26.Face5',-(self.top26/2)+1.75,-2.5,0,0,0)
                 for _ in range(30):
                         QtCore.QCoreApplication.processEvents()
                         time.sleep(0.02)
-                self.make_joint(asm,doc,'BLP.Face4','bottom26.Face4',40.5/2-2.75,(self.bottom26/2)-1.75,0,0,0,90)
+                self.make_joint_post(asm,doc,'BLP.Face6','bottom26.Face5',(self.bottom26/2)-1.75,2.5,0,0,0,0)
                 for _ in range(30):
                         QtCore.QCoreApplication.processEvents()
                         time.sleep(0.02)
-                self.make_joint(asm,doc,'BRP.Face4','bottom26.Face4',40.5/2-2.75,-(self.bottom26/2)+1.75,0,0,0,90)
-                for _ in range(30):
-                        QtCore.QCoreApplication.processEvents()
-                        time.sleep(0.02)
-                
                 #
-                # DEeleaet
-                #
-                """
-                if self.ramp_item.offset_value == 0:
-                    if self.ramp_item.snapped_corner == "Right-Top":
-                        append_row(sheet,"Ramp_post_2")
-                        self.make_post(doc,asm,"Ramp_post_2")
-                        self.make_joint(asm,doc,'Ramp_post_2.Face2','TRP.Face4',0,0,-48,0,0,0)
-                        
-                    elif self.ramp_item.snapped_corner == "Right-Bottom":
-                        append_row(sheet,"Ramp_post_2")
-                        self.make_post(doc,asm,"Ramp_post_2")
-                        self.make_joint(asm,doc,'Ramp_post_2.Face4','BRP.Face2',0,0,-48,0,0)	
-                else:
-                    if self.ramp_item.snapped_corner == "Right-Top":
-                        append_row(sheet,"Ramp_post_1")
-                        self.make_post(doc,asm,"Ramp_post_1")
-                        self.make_joint(asm,doc,'Ramp_post_1.Face2','TRP.Face4',0,0,-self.ramp_item.offset_value,0,0,0)
-                        
-                        append_row(sheet,"Ramp_post_2")
-                        self.make_post(doc,asm,"Ramp_post_2")
-                        self.make_joint(asm,doc,'Ramp_post_2.Face4','TRP.Face4',0,0,-self.ramp_item.offset_value+48,0,0)	
-                        
-                    elif self.ramp_item.snapped_corner == "Right-Bottom":
-                        append_row(sheet,"Ramp_post_1")
-                        self.make_post(doc,asm,"Ramp_post_1")
-                        self.make_joint(asm,doc,'Ramp_post_1.Face4','BRP.Face2',0,0,-self.ramp_item.offset_value,0,0)
-                        
-                        append_row(sheet,"Ramp_post_2")
-                        self.make_post(doc,asm,"Ramp_post_2")
-                        self.make_joint(asm,doc,'Ramp_post_2.Face4','BRP.Face2',0,0,-self.ramp_item.offset_value+48,0,0)	
-                        
-                    # place ramp create new post?
-                    
-                
-                # Stair for loop same thing
-                """
-                
+                self.make_joint_post(asm,doc,'BRP.Face6','bottom26.Face5',-(self.bottom26/2)+1.75,2.5,0,0,0,0)
+                for _ in range(30):
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.02)
             
-            # el if
-            #
-            #  if el
                 print(f" RAMP LOG: {self.ramp_item.name} | Edge: {self.ramp_item.snapped_edge} | Offset: {self.ramp_item.offset_value} in from {self.ramp_item.snapped_corner}")
             elif self.ramp_item.snapped_edge == "Left":
-                self.left26 = ((self.deck_width * SCALE) -3) # width - 3 inches offset to mm
-                self.right26 = (self.deck_width * SCALE)
-                self.top26 = ((self.deck_width * SCALE) -3)
-                self.bottom26 =((self.deck_width * SCALE) -3)
+                #self.left26 = ((self.deck_width * SCALE) -3) # width - 3 inches offset to mm
+                #self.right26 = (self.deck_width * SCALE)
+                #self.top26 = ((self.deck_width * SCALE) -3)
+                #self.bottom26 =((self.deck_width * SCALE) -3)
+                # frame
+                self.ground_joint(asm,doc,right26_obj)
+                self.make_joint(asm,doc,'top26.Face2','right26.Face4',0,(self.right26/2)-.75,0)
+                self.make_joint(asm,doc,'bottom26.Face2','right26.Face4',0,-(self.right26/2)+.75,0)
+                self.make_joint(asm,doc,'left26.Face3','right26.Face4',0,0,self.top26-5)
+                
+                print("posts")
+                # posts
+                self.make_joint_post(asm,doc,'TLP.Face6','top26.Face5',-(self.top26/2)+1.75,-2.5,0,0,0)
+                for _ in range(30):
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.02)
+                self.make_joint_post(asm,doc,'TRP.Face6','top26.Face5',(self.top26/2)-1.75,-2.5,0,0,0)
+                for _ in range(30):
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.02)
+                self.make_joint_post(asm,doc,'BLP.Face6','bottom26.Face5',-(self.bottom26/2)+1.75,2.5,0,0,0,0)
+                for _ in range(30):
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.02)
+                #
+                self.make_joint_post(asm,doc,'BRP.Face6','bottom26.Face5',(self.bottom26/2)-1.75,2.5,0,0,0,0)
+                for _ in range(30):
+                        QtCore.QCoreApplication.processEvents()
+                        time.sleep(0.02)
+            
+                print(f" RAMP LOG: {self.ramp_item.name} | Edge: {self.ramp_item.snapped_edge} | Offset: {self.ramp_item.offset_value} in from {self.ramp_item.snapped_corner}")
                 
             elif self.ramp_item.snapped_edge == "Top":
                 self.top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm
@@ -951,13 +1085,13 @@ class DeckDesignerWindow(QtGui.QDialog):
                 self.top26 = ((self.deck_length * SCALE) -3) * 25.4 # width - 3 inches offset to mm    
             
             
-                    #matching?? share
+            #matching?? share
             point_list={}
             # equizer
             edge=None
             if self.ramp_item.snapped_edge == "Right":
                 edge=self.right26
-                post="TRP.Face4"
+                post="TRP.Face1"
             elif self.ramp_item.snapped_edge == "Left":
                 edge=self.left26
             elif self.ramp_item.snapped_edge == "Top":
@@ -979,13 +1113,12 @@ class DeckDesignerWindow(QtGui.QDialog):
                     point_list["RampA"]=[-(self.ramp_item.offset_value),self.ramp_item.snapped_edge]
                     point_list["RampB"]=[-(self.ramp_item.offset_value+51.5),self.ramp_item.snapped_edge]
                 else:
-                    point_list["RampA"]=[-(edge-self.ramp_item.offset_value),self.ramp_item.snapped_edge]
-                    point_list["RampB"]=[-(edge-self.ramp_item.offset_value-51.5),self.ramp_item.snapped_edge]
+                    point_list["RampA"]=[-((edge-10.5)-self.ramp_item.offset_value),self.ramp_item.snapped_edge]
+                    point_list["RampB"]=[-((edge-10.5)-self.ramp_item.offset_value-51.5),self.ramp_item.snapped_edge]
             
             for index,stair in enumerate(self.stair_items):
                 if stair.snapped_edge == "Right":
                     edge=self.right26
-                    post="TRP.Face4"
                 elif stair.snapped_edge == "Left":
                     edge=self.left26
                 elif stair.snapped_edge == "Top":
@@ -998,18 +1131,17 @@ class DeckDesignerWindow(QtGui.QDialog):
                 if stair.offset_value == 0:
                     if re.search(r"(?<=-)Top", stair.snapped_corner):
                         #point_list[f"Post_{index}_A"]=-3.5
-                        point_list[f"Post_{index}_B"]=[-41,stair.snapped_edge]
+                        point_list[f"Post_{index}_B"]=[-44.5,stair.snapped_edge]
                     else:
                         #point_list[f"Post_{index}_A"]=-(edge-3.5)
-                        point_list[f"Post_{index}_B"]=[-(edge-51.5),stair.snapped_edge]
+                        point_list[f"Post_{index}_B"]=[-(edge-44.5),stair.snapped_edge]
                 else:
                     if re.search(r"(?<=-)Top", stair.snapped_corner):
                         point_list[f"Post_{index}_A"]=[-stair.offset_value,stair.snapped_edge]
-                        point_list[f"Post_{index}_B"]=[-(stair.offset_value+41),stair.snapped_edge]
+                        point_list[f"Post_{index}_B"]=[-(stair.offset_value+44.5),stair.snapped_edge]
                     else:
-                        point_list[f"Post_{index}_A"]=[-(edge-stair.offset_value),stair.snapped_edge]
-                        point_list[f"Post_{index}_B"]=[-(edge-stair.offset_value),stair.snapped_edge]
-                
+                        point_list[f"Post_{index}_A"]=[-((edge-10.5)-stair.offset_value),stair.snapped_edge]
+                        point_list[f"Post_{index}_B"]=[-((edge-10.5)-stair.offset_value-44.5),stair.snapped_edge]
             print(point_list)
             
             right_posts={}
@@ -1017,17 +1149,19 @@ class DeckDesignerWindow(QtGui.QDialog):
             top_posts={}
             bottom_posts={}
             for name, (val, side) in point_list.items(): 
+                val=val-3.5
                 if side == "Right":
                     if val not in right_posts.values():
                         right_posts[name]=val
-                        print(77)
-                        append_row(sheet,name)
+                        self.append_row(sheet,name)
                         self.make_post(doc,asm,name)
-                        self.make_joint(asm,doc,f'{name}.Face2','TRP.Face4',0,0,val,0,0,0)
-                        print(723)
+                        self.make_joint_post(asm,doc,f'{name}.Face6','TRP.Face5',0,val,0,0,0,0) ######### fix this refrence to the board nonot posdt
                 if side == "Left":
                     if val not in left_posts.values():
                         left_posts[name]=val
+                        self.append_row(sheet,name)
+                        self.make_post(doc,asm,name)
+                        self.make_joint_post(asm,doc,f'{name}.Face6','TLP.Face5',0,val,0,0,0,0)
                 if side == "Top":
                     if val not in top_posts.values():
                         top_posts[name]=val
@@ -1035,11 +1169,6 @@ class DeckDesignerWindow(QtGui.QDialog):
                     if val not in top_posts.values():
                         top_posts[name]=val
 
-        
-
-            
-            
-            
         # normal
         else:
             print("NORMAL")
@@ -1082,10 +1211,6 @@ class DeckDesignerWindow(QtGui.QDialog):
         print(f"joists_direct {joists_direct}   num_of_runners : {num_of_joists}  spacing_joists {spacing_joists} joists_length {joists_length}" )
         
         
-
-        
-        
-        
         if joists_direct in "length":
             board_length=self.right26 #######
             base="right26.Face3"
@@ -1102,10 +1227,11 @@ class DeckDesignerWindow(QtGui.QDialog):
             asm.addObject(joist) 
 
             self.make_joint(asm,doc,f'joist_{i}.Face1',base,0,((spacing_joists*(i+1))-((board_length/2)-.75)),0)
-            for _ in range(30):
+            for _ in range(60):
                 QtCore.QCoreApplication.processEvents()
                 time.sleep(0.02)
-        doc.recompute()
+            doc.recompute()
+        
         """
         # Beam!!
         if ((self.deck_width * SCALE) > 96 or (self.deck_length * SCALE) > 96):
@@ -1134,17 +1260,116 @@ class DeckDesignerWindow(QtGui.QDialog):
             else:
                 print("BEAM width")       
         """
-                   
-                   
-                   
-                   
+        # hand rails
+        #
+        # cheack if side clear of obj
+        # FACE 6
+        print(f"HOUSE LABELE HELP ME {self.house_label_value}")
+        if any(v[1] == "Right" for v in point_list.values()):
+            print("not normal")
+            negatives=[]
+            for v in point_list.values():
+                if v[1] == "Right":
+                    negatives.append(v[0])
+            print(negatives)
+        
+        else:
+            # def handrail_create(self,doc,asm,length,name,left_corner ,right_corner):
+            top_deck, top_rail, mid_rail = self.handrail_create(doc,asm,self.deck_length*SCALE,"Right",True,True)
+            self.make_joint(asm,doc,f"{top_rail}.Face2","right26.Face6",0,0,35,0,0,90)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+            self.make_joint(asm,doc,f"{mid_rail}.Face2","right26.Face6",0,0,10,0,0,90)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+            self.make_joint(asm,doc,f"{top_deck}.Face9","right26.Face6",0,1.75,35.5,0,0,0)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+            
+        if any(v[1] == "Left" for v in point_list.values()):
+            print("not normal")
+            negatives=[]
+            for v in point_list.values():
+                if v[1] == "Right":
+                    negatives.append(v[0])
+            print(negatives)
+        ##################################################### NEED TO CHANGE THE LENGSTH AND WIDTHS
+        else:
+            # def handrail_create(self,doc,asm,length,name,left_corner ,right_corner):
+            top_deck, top_rail, mid_rail = self.handrail_create(doc,asm,self.deck_length*SCALE,"Left",True,True)
+            self.make_joint(asm,doc,f"{top_rail}.Face2","left26.Face6",0,0,35,0,0,90)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+            self.make_joint(asm,doc,f"{mid_rail}.Face2","left26.Face6",0,0,10,0,0,90)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+            self.make_joint(asm,doc,f"{top_deck}.Face9","left26.Face6",0,0,35.5,0,0,0)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+        
+        if any(v[1] == "Top" for v in point_list.values()):
+            print("not normal")
+            negatives=[]
+            for v in point_list.values():
+                if v[1] == "Right":
+                    negatives.append(v[0])
+            print(negatives)
+        
+        else:
+            # def handrail_create(self,doc,asm,length,name,left_corner ,right_corner):
+            top_deck, top_rail, mid_rail = self.handrail_create(doc,asm,self.deck_width*SCALE,"Top",True,True)
+            self.make_joint(asm,doc,f"{top_rail}.Face2","top26.Face6",0,0,35,0,0,90)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+            self.make_joint(asm,doc,f"{mid_rail}.Face2","top26.Face6",0,0,10,0,0,90)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+            self.make_joint(asm,doc,f"{top_deck}.Face10","top26.Face6",0,0,35.5,0,0,0)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)  
+              
+        if any(v[1] == "Bottom" for v in point_list.values()):
+            print("not normal")
+            negatives=[]
+            for v in point_list.values():
+                if v[1] == "Right":
+                    negatives.append(v[0])
+            print(negatives)
+        
+        else:
+            # def handrail_create(self,doc,asm,length,name,left_corner ,right_corner):
+            top_deck, top_rail, mid_rail = self.handrail_create(doc,asm,self.deck_width*SCALE,"Bottom",True,True)
+            self.make_joint(asm,doc,f"{top_rail}.Face2","bottom26.Face6",0,0,35,0,0,90)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+            self.make_joint(asm,doc,f"{mid_rail}.Face2","bottom26.Face6",0,0,10,0,0,90)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
+            self.make_joint(asm,doc,f"{top_deck}.Face9","bottom26.Face6",0,0,35.5,180,0,0)
+            for _ in range(30):
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.02)
 
     def joint_ramp_deck(self,asm,doc,path):
         itemA=path
         if self.ramp_item.snapped_edge == "Right":
             itemB='Deck.right26.Face4'
             board_length=self.right26
-        
+        elif self.ramp_item.snapped_edge == "Left":
+            itemB='Deck.left26.Face4'
+            board_length=self.left26
+            
         offsetX=0
         offsetZ=0
         offsetY=0
@@ -1208,12 +1433,8 @@ class DeckDesignerWindow(QtGui.QDialog):
         rot = App.Rotation(rotZ, rotY, rotX)
         new_joint.Offset2 = App.Placement(App.Vector(offsetX* 25.4 , offsetY*25.4, offsetZ* 25.4), rot)
         Gui.Selection.clearSelection()
-        
-        
-            
-        
-        
-        
+          
+  
 class DraggableItem(QtGui.QGraphicsRectItem):
     def __init__(self, rect, color, name="Item", deck_item=None, texture_path=None, parent=None):
         super(DraggableItem, self).__init__(rect, parent)
@@ -1325,6 +1546,8 @@ class DraggableItem(QtGui.QGraphicsRectItem):
         label.setFont(font)
         lb = label.boundingRect()
         label.setPos(item_rect.width()/2 - lb.width()/2, item_rect.height()/2 - lb.height()/2)
+
+
 
 class StairsItem(DraggableItem):
     def __init__(self, scale, index=1, deck_item=None, macro_dir="", parent=None):
